@@ -40,7 +40,9 @@ spec:
             description: spec defines the desired state of BookmarkGroup
             properties:
               links:
-                description: Links are the dashboard entries shown under this group.
+                description: |-
+                  Links are the dashboard entries shown under this group.
+                  When omitted or empty, the group is created but contains no links.
                 items:
                   description: BookmarkLink describes a link entry rendered in the
                     dashboard.
@@ -147,15 +149,12 @@ spec:
                   required:
                   - name
                   type: object
-                minItems: 1
                 type: array
               name:
                 description: |-
                   Name is the display name for this group in the dashboard.
                   When omitted, metadata.name is used.
                 type: string
-            required:
-            - links
             type: object
           status:
             description: status defines the observed state of BookmarkGroup

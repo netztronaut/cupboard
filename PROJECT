@@ -31,4 +31,13 @@ resources:
   webhooks:
     validation: true
     webhookVersion: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: netztronaut.de
+  group: dashboard
+  kind: Bookmark
+  path: github.com/netztronaut/cupboard/api/dashboard/v1alpha1
+  version: v1alpha1
 version: "3"

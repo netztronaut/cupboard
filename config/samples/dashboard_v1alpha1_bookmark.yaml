@@ -1,0 +1,10 @@
+apiVersion: dashboard.netztronaut.de/v1alpha1
+kind: Bookmark
+metadata:
+  name: bookmark-sample
+spec:
+  group: platform
+  name: Kubernetes
+  url: https://kubernetes.io/
+  target: _blank
+  icon: https://kubernetes.io/images/favicon.png

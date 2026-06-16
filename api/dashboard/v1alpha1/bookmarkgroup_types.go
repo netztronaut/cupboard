@@ -28,8 +28,9 @@ type BookmarkGroupSpec struct {
 	Name string `json:"name,omitempty"`
 
 	// Links are the dashboard entries shown under this group.
-	// +kubebuilder:validation:MinItems=1
-	Links []BookmarkLink `json:"links"`
+	// When omitted or empty, the group is created but contains no links.
+	// +optional
+	Links []BookmarkLink `json:"links,omitempty"`
 }
 
 // BookmarkGroupStatus defines the observed state of BookmarkGroup.
@@ -151,8 +152,4 @@ type BookmarkGroupList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []BookmarkGroup `json:"items"`
-}
-
-func init() {
-	SchemeBuilder.Register(&BookmarkGroup{}, &BookmarkGroupList{})
 }

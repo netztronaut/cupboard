@@ -72,6 +72,7 @@ rules:
   - dashboard.netztronaut.de
   resources:
   - bookmarkgroups
+  - bookmarks
   verbs:
   - create
   - delete
@@ -84,12 +85,14 @@ rules:
   - dashboard.netztronaut.de
   resources:
   - bookmarkgroups/finalizers
+  - bookmarks/finalizers
   verbs:
   - update
 - apiGroups:
   - dashboard.netztronaut.de
   resources:
   - bookmarkgroups/status
+  - bookmarks/status
   verbs:
   - get
   - patch

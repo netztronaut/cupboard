@@ -453,6 +453,14 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "dashboard-bookmarkgroup")
 		os.Exit(1)
 	}
+
+	if err := (&dashboardcontroller.BookmarkReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "dashboard-bookmark")
+		os.Exit(1)
+	}
 	// nolint:goconst
 	if enableWebhooks {
 		if err := webhookdashboardv1alpha1.SetupBookmarkGroupWebhookWithManager(mgr); err != nil {
