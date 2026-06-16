@@ -1,0 +1,9 @@
+apiVersion: forecastle.stakater.com/v1alpha1
+kind: ForecastleApp
+metadata:
+  name: forecastleapp-sample
+spec:
+  name: Kubernetes Docs
+  group: Platform
+  icon: https://kubernetes.io/images/favicon.png
+  url: https://kubernetes.io/docs/

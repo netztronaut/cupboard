@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -111,23 +112,6 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 	if err != nil {
 		return nil, err
 	}
-	pageTemplate, err := loadPageTemplate(options.Page.TemplateSet)
-	if err != nil {
-		return nil, err
-	}
-	pageTitle := strings.TrimSpace(options.Page.Title)
-	if pageTitle == "" {
-		pageTitle = "cupboard"
-	}
-	contentLayout := strings.ToLower(strings.TrimSpace(options.Page.ContentLayout))
-	if contentLayout != "grid" {
-		contentLayout = "list"
-	}
-	faviconURL := strings.TrimSpace(options.Page.FaviconURL)
-	if faviconURL == "" {
-		faviconURL = "/favicon.svg"
-	}
-
 	auth := newAuthService(options.Auth)
 	collector := newDashboardCollector(k8sClient, discovery, options.LinkGroups, options.StaticLinks)
 	collector.logMissingOptionalResources(context.Background())
@@ -137,18 +121,6 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 	staticServer := http.FileServer(http.FS(staticFS))
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", staticServer))
-	mux.HandleFunc("/api/public/auth-config", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if !auth.enabled {
-			_, _ = w.Write([]byte(`{"enabled":false}`))
-			return
-		}
-		_ = json.NewEncoder(w).Encode(auth.authConfig(r.Context(), requestBaseURL(r)))
-	})
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -271,35 +243,37 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 		}()
 	})
 
-	pageHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	frontendIndexHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		renderErr := pageTemplate.tmpl.ExecuteTemplate(w, "page", pageTemplateData{
-			Title:         pageTitle,
-			FaviconURL:    faviconURL,
-			ContentLayout: contentLayout,
-		})
-		if renderErr != nil {
-			http.Error(w, renderErr.Error(), http.StatusInternalServerError)
+		index, readErr := fs.ReadFile(frontendFS, "index.html")
+		if readErr != nil {
+			http.Error(w, readErr.Error(), http.StatusInternalServerError)
 			return
 		}
+		index, injectErr := injectAuthConfig(index, auth.authConfig(r.Context(), requestBaseURL(r)))
+		if injectErr != nil {
+			http.Error(w, injectErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(index)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cleanPath := path.Clean(r.URL.Path)
 		if cleanPath == "." || cleanPath == "/" {
-			if auth.enabled {
-				requireAuthentication(auth, pageHandler).ServeHTTP(w, r)
-			} else {
-				pageHandler.ServeHTTP(w, r)
-			}
+			frontendIndexHandler.ServeHTTP(w, r)
 			return
 		}
 
 		assetPath := strings.TrimPrefix(cleanPath, "/")
+		if assetPath == "index.html" {
+			frontendIndexHandler.ServeHTTP(w, r)
+			return
+		}
 		if _, statErr := fs.Stat(frontendFS, assetPath); statErr == nil {
 			fileServer.ServeHTTP(w, r)
 			return
@@ -308,12 +282,23 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 			return
 		}
 
-		fallbackReq := r.Clone(r.Context())
-		fallbackReq.URL.Path = "/index.html"
-		fileServer.ServeHTTP(w, fallbackReq)
+		frontendIndexHandler.ServeHTTP(w, r)
 	})
 
 	return mux, nil
+}
+
+func injectAuthConfig(index []byte, config authConfigResponse) ([]byte, error) {
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	injection := []byte("\n    <script>window.config = " + string(configJSON) + ";</script>")
+	headClose := []byte("</head>")
+	if !bytes.Contains(index, headClose) {
+		return nil, errors.New("index.html is missing </head>")
+	}
+	return bytes.Replace(index, headClose, append(injection, headClose...), 1), nil
 }
 
 func requireAuthentication(auth *authService, next http.Handler) http.Handler {
@@ -343,11 +328,6 @@ func openAPISpec() map[string]interface{} {
 			},
 		},
 		"paths": map[string]interface{}{
-			"/api/public/auth-config": map[string]interface{}{
-				"get": map[string]interface{}{
-					"summary": "OIDC PKCE config for frontend",
-				},
-			},
 			"/api/session": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary": "Get session userinfo from cookie",

@@ -1,0 +1,88 @@
+# Kustomization for LOCAL_TESTING mode with webhooks enabled
+# This is a standalone configuration that combines the necessary components
+# for local testing without cert-manager (uses pre-generated self-signed certs)
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Build from the individual components, skip cert-manager
+resources:
+  - ../crd/
+  - ../rbac/
+  - ../manager/
+  - ../webhook/
+  - cupboard_web.yaml
+  - metrics_service.yaml
+
+# Override namespace for local testing
+namespace: local-testing
+
+# Customize for local testing
+patches:
+  # Enable webhooks and set environment variables
+  - target:
+      kind: Deployment
+      name: controller-manager
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: WATCH_NAMESPACE
+            value: local-testing
+          - name: ENABLE_WEBHOOKS
+            value: "true"
+          - name: ENABLE_AUTH
+            value: "true"
+          - name: CUPBOARD_COOKIE_SECRET
+            value: local-testing-cookie-secret-change-me
+          - name: OIDC_ISSUER_URL
+            value: http://auth.localhost:8080/application/o/cupboard/
+          - name: OIDC_CLIENT_ID
+            value: cupboard-local
+          - name: OIDC_REDIRECT_PATH
+            value: /auth/callback
+          - name: OIDC_SCOPES
+            value: openid profile email
+          - name: OIDC_USERINFO_ENDPOINT
+            value: http://authentik-server.authentik.svc.cluster.local/application/o/userinfo/
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: controller:latest
+      # Add webhook port and cert path configuration
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --webhook-cert-path=/tmp/k8s-webhook-server/serving-certs
+      # Add webhook server port
+      - op: add
+        path: /spec/template/spec/containers/0/ports/-
+        value:
+          containerPort: 8082
+          name: web
+          protocol: TCP
+      - op: add
+        path: /spec/template/spec/containers/0/ports/-
+        value:
+          containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+      # Add volume mount for webhook certificates
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: webhook-certs
+          readOnly: true
+      # Add webhook certificate volume (from pre-generated secret)
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: webhook-certs
+          secret:
+            secretName: webhook-server-cert
+      # Remove read-only filesystem restriction for webhook certs
+      - op: remove
+        path: /spec/template/spec/containers/0/securityContext/readOnlyRootFilesystem
+      # Set image pull policy to IfNotPresent for local Docker image
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

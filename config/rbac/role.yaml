@@ -1,0 +1,96 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - bookmarkgroups
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - forecastle.stakater.com
+  resources:
+  - forecastleapps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - routes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - traefik.containo.us
+  - traefik.io
+  resources:
+  - ingressroutes
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: manager-role
+  namespace: cupboard-system
+rules:
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - bookmarkgroups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - bookmarkgroups/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - bookmarkgroups/status
+  verbs:
+  - get
+  - patch
+  - update

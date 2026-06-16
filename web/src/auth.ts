@@ -2,27 +2,26 @@ import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts'
 
 export type AuthConfig = {
   enabled: boolean
-  issuerUrl: string
+  issuerUrl?: string
   openidConfigurationUrl?: string
-  clientId: string
-  redirectPath: string
-  scopes: string
+  clientId?: string
+  redirectPath?: string
+  scopes?: string
+}
+
+declare global {
+  interface Window {
+    config?: AuthConfig
+  }
 }
 
 let managerPromise: Promise<UserManager> | undefined
 
-let authConfigPromise: Promise<AuthConfig> | undefined
-
 export async function getAuthConfig(): Promise<AuthConfig> {
-  if (!authConfigPromise) {
-    authConfigPromise = fetch('/api/public/auth-config', { credentials: 'include' }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`failed to load auth config (${response.status})`)
-      }
-      return (await response.json()) as AuthConfig
-    })
+  if (!window.config) {
+    throw new Error('auth config missing from root document')
   }
-  return authConfigPromise
+  return window.config
 }
 
 async function requireEnabledAuthConfig(): Promise<AuthConfig> {

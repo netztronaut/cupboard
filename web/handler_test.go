@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,7 @@ func (s stubDiscovery) ServerResourcesForGroupVersion(groupVersion string) (*met
 	return &metav1.APIResourceList{}, nil
 }
 
-func TestAuthConfigDisabledReturnsExactPayload(t *testing.T) {
+func TestRootDocumentInjectsDisabledAuthConfig(t *testing.T) {
 	t.Helper()
 
 	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{Auth: AuthOptions{Enabled: false}})
@@ -31,13 +32,16 @@ func TestAuthConfigDisabledReturnsExactPayload(t *testing.T) {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/public/auth-config", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
 
-	if got := strings.TrimSpace(rr.Body.String()); got != `{"enabled":false}` {
-		t.Fatalf("unexpected body: got %q", got)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `<script>window.config = {"enabled":false};</script>`) {
+		t.Fatalf("root document does not contain disabled auth config: %s", rr.Body.String())
 	}
 }
 
@@ -141,7 +145,7 @@ func TestOIDCDiscoveryProxyRewritesIssuer(t *testing.T) {
 	}
 }
 
-func TestAuthConfigUsesDirectIssuerWhenServerCannotReachIssuer(t *testing.T) {
+func TestRootDocumentAuthConfigUsesDirectIssuerWhenServerCannotReachIssuer(t *testing.T) {
 	t.Helper()
 
 	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{
@@ -154,7 +158,7 @@ func TestAuthConfigUsesDirectIssuerWhenServerCannotReachIssuer(t *testing.T) {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/public/auth-config", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Host = "cupboard.local"
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -163,9 +167,9 @@ func TestAuthConfigUsesDirectIssuerWhenServerCannotReachIssuer(t *testing.T) {
 		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var payload authConfigResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode auth-config: %v", err)
+	payload, err := extractInjectedAuthConfig(rr.Body.String())
+	if err != nil {
+		t.Fatalf("decode injected auth config: %v", err)
 	}
 	if got, want := payload.IssuerURL, "http://127.0.0.1:1"; got != want {
 		t.Fatalf("issuerUrl mismatch: got %q want %q", got, want)
@@ -180,6 +184,32 @@ func TestAuthConfigUsesDirectIssuerWhenServerCannotReachIssuer(t *testing.T) {
 	if discoveryRR.Code != http.StatusNotFound {
 		t.Fatalf("unexpected discovery proxy status: got %d body=%s", discoveryRR.Code, discoveryRR.Body.String())
 	}
+}
+
+func TestInjectAuthConfigRejectsIndexWithoutHead(t *testing.T) {
+	t.Helper()
+
+	if _, err := injectAuthConfig([]byte("<html></html>"), authConfigResponse{Enabled: true}); err == nil {
+		t.Fatal("expected error for index without </head>")
+	}
+}
+
+func extractInjectedAuthConfig(document string) (authConfigResponse, error) {
+	const prefix = `<script>window.config = `
+	start := strings.Index(document, prefix)
+	if start == -1 {
+		return authConfigResponse{}, errors.New("window.config script not found")
+	}
+	start += len(prefix)
+	end := strings.Index(document[start:], `;</script>`)
+	if end == -1 {
+		return authConfigResponse{}, errors.New("window.config script terminator not found")
+	}
+	var payload authConfigResponse
+	if err := json.Unmarshal([]byte(document[start:start+end]), &payload); err != nil {
+		return authConfigResponse{}, err
+	}
+	return payload, nil
 }
 
 func TestDashboardIncludesStaticLinks(t *testing.T) {
@@ -285,7 +315,7 @@ func TestLinkGroupOrderingByClassPriorityAndDisplayName(t *testing.T) {
 	}
 }
 
-func TestRootPageUsesConfiguredTemplateOptions(t *testing.T) {
+func TestRootPageServesSPAIndexWithInjectedAuthConfig(t *testing.T) {
 	t.Helper()
 
 	s := runtime.NewScheme()
@@ -323,33 +353,38 @@ func TestRootPageUsesConfiguredTemplateOptions(t *testing.T) {
 		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "<title>My Cupboard</title>") {
-		t.Fatalf("expected configured title in page: %s", body)
+	if !strings.Contains(body, `<div id="root"></div>`) {
+		t.Fatalf("expected SPA root container in page: %s", body)
 	}
-	if !strings.Contains(body, `rel="icon" href="/custom.ico"`) {
-		t.Fatalf("expected configured favicon in page: %s", body)
+	if !strings.Contains(body, `<script>window.config = {"enabled":false};</script>`) {
+		t.Fatalf("expected injected auth config in page: %s", body)
 	}
-	if !strings.Contains(body, "content--grid") {
-		t.Fatalf("expected grid layout class in page: %s", body)
-	}
-	if !strings.Contains(body, `id="dashboard-groups"`) {
-		t.Fatalf("expected client-side dashboard container in page: %s", body)
-	}
-	if !strings.Contains(body, `fetch("/api/dashboard"`) {
-		t.Fatalf("expected client-side dashboard fetch in page: %s", body)
-	}
-	if !strings.Contains(body, `/api/dashboard/updates`) {
-		t.Fatalf("expected websocket updates endpoint in page: %s", body)
-	}
-	if strings.Contains(body, "cdnjs.cloudflare.com") {
-		t.Fatalf("expected no external font-awesome CDN links in page: %s", body)
-	}
-	if !strings.Contains(body, "/static/fontawesome/css/fontawesome.min.css") {
-		t.Fatalf("expected embedded font-awesome css links in page: %s", body)
+	if strings.Contains(body, "My Cupboard") || strings.Contains(body, "content--grid") || strings.Contains(body, "/custom.ico") {
+		t.Fatalf("expected npm-built SPA index instead of legacy page template: %s", body)
 	}
 }
 
-func TestRootPageForecastleTheme(t *testing.T) {
+func TestIndexHTMLPathUsesInjectedSPAIndex(t *testing.T) {
+	t.Helper()
+
+	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{Auth: AuthOptions{Enabled: false}})
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `<script>window.config = {"enabled":false};</script>`) {
+		t.Fatalf("index.html path does not contain injected auth config: %s", rr.Body.String())
+	}
+}
+
+func TestRootPageTemplateSetDoesNotReplaceSPAIndex(t *testing.T) {
 	t.Helper()
 
 	s := runtime.NewScheme()
@@ -384,13 +419,10 @@ func TestRootPageForecastleTheme(t *testing.T) {
 		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "class=\"fc-header\"") || !strings.Contains(body, "class=\"container fc-groups\"") {
-		t.Fatalf("expected forecastle theme classes in page: %s", body)
+	if !strings.Contains(body, `<div id="root"></div>`) {
+		t.Fatalf("expected SPA root container in page: %s", body)
 	}
-	if !strings.Contains(body, `fetch("/api/dashboard"`) {
-		t.Fatalf("expected client-side dashboard fetch in forecastle page: %s", body)
-	}
-	if !strings.Contains(body, `/api/dashboard/updates`) {
-		t.Fatalf("expected websocket updates endpoint in forecastle page: %s", body)
+	if strings.Contains(body, `class="fc-header"`) || strings.Contains(body, `class="container fc-groups"`) {
+		t.Fatalf("expected forecastle template not to replace SPA index: %s", body)
 	}
 }

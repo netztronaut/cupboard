@@ -1,0 +1,19 @@
+# Metrics service (copied from config/default/)
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: cupboard
+    app.kubernetes.io/managed-by: kustomize
+  name: controller-manager-metrics-service
+  namespace: system
+spec:
+  ports:
+  - name: metrics
+    port: 8080
+    protocol: TCP
+    targetPort: metrics
+  selector:
+    control-plane: controller-manager
+    app.kubernetes.io/name: cupboard

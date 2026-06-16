@@ -1,0 +1,33 @@
+watchNamespace: default
+localTesting: false
+enableWebhooks: true
+
+web:
+  bindAddress: ":8082"
+
+page:
+  templateSet: "default"
+  title: "cupboard"
+  faviconURL: "/favicon.svg"
+  contentLayout: "list" # list or grid
+
+auth:
+  enabled: true
+  issuerURL: "https://issuer.example.com"
+  clientID: "cupboard"
+  redirectPath: "/auth/callback"
+  scopes: "openid profile email"
+  cookieSecret: "replace-me"
+
+dashboard:
+  linkGroups:
+    - name: "pinned"
+      priority: 10
+      priorityClass: "first"
+      displayName: "Pinned"
+  staticLinks:
+    - linkGroup: "pinned"
+      name: "GitHub"
+      url: "https://github.com"
+      target: "_blank"
+      icon: "fa-github"

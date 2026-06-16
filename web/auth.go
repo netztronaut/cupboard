@@ -53,11 +53,11 @@ type authService struct {
 
 type authConfigResponse struct {
 	Enabled                bool   `json:"enabled"`
-	IssuerURL              string `json:"issuerUrl"`
+	IssuerURL              string `json:"issuerUrl,omitempty"`
 	OpenIDConfigurationURL string `json:"openidConfigurationUrl,omitempty"`
-	ClientID               string `json:"clientId"`
-	RedirectPath           string `json:"redirectPath"`
-	Scopes                 string `json:"scopes"`
+	ClientID               string `json:"clientId,omitempty"`
+	RedirectPath           string `json:"redirectPath,omitempty"`
+	Scopes                 string `json:"scopes,omitempty"`
 }
 
 func newAuthService(options AuthOptions) *authService {
@@ -81,6 +81,10 @@ func newAuthService(options AuthOptions) *authService {
 }
 
 func (a *authService) authConfig(ctx context.Context, requestIssuerURL string) authConfigResponse {
+	if !a.enabled {
+		return authConfigResponse{Enabled: false}
+	}
+
 	issuerURL := a.issuerURL
 	discoveryURL := oidcDiscoveryURL(issuerURL)
 
