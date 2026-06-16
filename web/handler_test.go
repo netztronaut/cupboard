@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
 	forecastlev1alpha1 "github.com/netztronaut/cupboard/api/forecastle/v1alpha1"
@@ -424,6 +426,9 @@ func TestForecastleAppDisplayGroupMergesWithConfiguredLinkGroup(t *testing.T) {
 			if link.Source != "forecastleapp" {
 				t.Fatalf("expected Quay.io source forecastleapp, got %q", link.Source)
 			}
+			if link.Target != "_blank" {
+				t.Fatalf("expected Quay.io target _blank, got %q", link.Target)
+			}
 		}
 	}
 	if !found {
@@ -610,6 +615,46 @@ func TestIndexHTMLPathUsesInjectedSPAIndex(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `<script>window.config = {"enabled":false};</script>`) {
 		t.Fatalf("index.html path does not contain injected auth config: %s", rr.Body.String())
+	}
+}
+
+func TestFaviconPrefersFilesystemAsset(t *testing.T) {
+	t.Helper()
+
+	previousFS := filesystemTemplateFS
+	filesystemTemplateFS = os.DirFS(t.TempDir())
+	t.Cleanup(func() {
+		filesystemTemplateFS = previousFS
+	})
+
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/favicon.ico", []byte("filesystem favicon"), 0o644); err != nil {
+		t.Fatalf("write favicon: %v", err)
+	}
+	filesystemTemplateFS = os.DirFS(dir)
+
+	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{Auth: AuthOptions{Enabled: false}})
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Body.String(); got != "filesystem favicon" {
+		t.Fatalf("favicon mismatch: got %q", got)
+	}
+}
+
+func TestReadRootAssetRejectsNestedPaths(t *testing.T) {
+	t.Helper()
+
+	if _, err := readRootAsset(fstest.MapFS{}, "../favicon.ico"); err == nil {
+		t.Fatal("expected nested root asset path to be rejected")
 	}
 }
 

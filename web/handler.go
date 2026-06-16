@@ -125,6 +125,19 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 	staticServer := http.FileServer(http.FS(staticFS))
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", staticServer))
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		favicon, err := readRootAsset(frontendFS, "favicon.ico")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/x-icon")
+		_, _ = w.Write(favicon)
+	})
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -333,6 +346,18 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 	})
 
 	return mux, nil
+}
+
+func readRootAsset(embeddedFS fs.FS, name string) ([]byte, error) {
+	if strings.Contains(name, `/`) || strings.Contains(name, `\`) || name == "." || name == ".." {
+		return nil, fs.ErrInvalid
+	}
+	if contents, err := fs.ReadFile(filesystemTemplateFS, name); err == nil {
+		return contents, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	return fs.ReadFile(embeddedFS, name)
 }
 
 func injectAuthConfig(index []byte, config authConfigResponse) ([]byte, error) {

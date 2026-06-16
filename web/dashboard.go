@@ -261,7 +261,7 @@ func (c *dashboardCollector) collectForecastleApps(ctx context.Context, groups m
 		linkName := item.Spec.Name
 		groupName := resolveLinkGroupName(item.Spec.Group, groupDetails)
 		icon := item.Spec.Icon
-		target := "_self"
+		target := string(dashboardv1alpha1.BookmarkLinkTargetBlank)
 		if v := item.Spec.Properties["target"]; strings.TrimSpace(v) != "" {
 			target = v
 		}
