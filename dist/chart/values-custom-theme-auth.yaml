@@ -1,0 +1,102 @@
+## Example values for deploying Cupboard with:
+## - authentication enabled
+## - a mounted Cupboard config file
+## - a mounted filesystem template set named "custom-theme"
+##
+## Before installing, create the referenced ConfigMaps or adjust the names below:
+##
+##   kubectl create configmap cupboard-config \
+##     --from-file=cupboard.yaml=./cupboard.yaml \
+##     --namespace cupboard-system
+##
+##   kubectl create configmap cupboard-custom-theme \
+##     --from-file=page.tmpl=./templates/custom-theme/page.tmpl \
+##     --from-file=header.tmpl=./templates/custom-theme/header.tmpl \
+##     --from-file=footer.tmpl=./templates/custom-theme/footer.tmpl \
+##     --from-file=content.tmpl=./templates/custom-theme/content.tmpl \
+##     --from-file=group.tmpl=./templates/custom-theme/group.tmpl \
+##     --from-file=link.tmpl=./templates/custom-theme/link.tmpl \
+##     --namespace cupboard-system
+
+manager:
+  image:
+    repository: docker.io/netztronaut/cupboard
+    tag: latest
+
+  env:
+    - name: WATCH_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+    - name: ENABLE_AUTH
+      value: "true"
+    - name: CUPBOARD_CONFIG
+      value: /etc/cupboard/cupboard.yaml
+    - name: CUPBOARD_TEMPLATE_SET
+      value: custom-theme
+    - name: CUPBOARD_FORECASTLE_INSTANCE
+      value: cupboard
+    - name: CUPBOARD_COOKIE_SECRET
+      value: replace-with-a-long-random-secret
+    - name: OIDC_ISSUER_URL
+      value: https://auth.example.com/application/o/cupboard/
+    - name: OIDC_CLIENT_ID
+      value: cupboard
+    - name: OIDC_REDIRECT_PATH
+      value: /auth/callback
+    - name: OIDC_SCOPES
+      value: openid profile email
+    - name: OIDC_USERINFO_ENDPOINT
+      value: https://auth.example.com/application/o/userinfo/
+
+  extraVolumeMounts:
+    - name: cupboard-config
+      mountPath: /etc/cupboard
+      readOnly: true
+    - name: custom-theme
+      mountPath: /templates/custom-theme
+      readOnly: true
+
+  extraVolumes:
+    - name: cupboard-config
+      configMap:
+        name: cupboard-config
+    - name: custom-theme
+      configMap:
+        name: cupboard-custom-theme
+
+forecastle:
+  enabled: true
+
+## Example content for the mounted cupboard.yaml:
+##
+## watchNamespace: cupboard-system
+## localTesting: false
+## enableWebhooks: true
+## page:
+##   templateSet: custom-theme
+##   title: Cupboard
+##   faviconURL: /favicon.svg
+##   contentLayout: grid
+## auth:
+##   enabled: true
+##   issuerURL: https://auth.example.com/application/o/cupboard/
+##   clientID: cupboard
+##   redirectPath: /auth/callback
+##   scopes: openid profile email
+##   userInfoEndpoint: https://auth.example.com/application/o/userinfo/
+## forecastle:
+##   instance: cupboard
+## dashboard:
+##   linkGroups:
+##     - name: code-devops
+##       displayName: Code & DevOps
+##       priority: 10
+##   staticLinks:
+##     - linkGroup: code-devops
+##       name: GitHub
+##       url: https://github.com
+##       target: _blank
+##       icon: fa-github
+##       groups:
+##         - code-internal

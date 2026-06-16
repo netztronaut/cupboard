@@ -25,14 +25,21 @@ type dashboardDiscovery interface {
 }
 
 type dashboardCollector struct {
-	reader      client.Reader
-	discovery   dashboardDiscovery
-	linkGroups  []LinkGroup
-	staticLinks []StaticLink
+	reader             client.Reader
+	discovery          dashboardDiscovery
+	forecastleInstance string
+	linkGroups         []LinkGroup
+	staticLinks        []StaticLink
 }
 
-func newDashboardCollector(reader client.Reader, discovery dashboardDiscovery, linkGroups []LinkGroup, staticLinks []StaticLink) *dashboardCollector {
-	return &dashboardCollector{reader: reader, discovery: discovery, linkGroups: linkGroups, staticLinks: staticLinks}
+func newDashboardCollector(reader client.Reader, discovery dashboardDiscovery, options Options) *dashboardCollector {
+	return &dashboardCollector{
+		reader:             reader,
+		discovery:          discovery,
+		forecastleInstance: strings.TrimSpace(options.Forecastle.Instance),
+		linkGroups:         options.LinkGroups,
+		staticLinks:        options.StaticLinks,
+	}
 }
 
 var setupLog = ctrl.Log.WithName("web").WithName("dashboard")
@@ -88,7 +95,7 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 		return DashboardResponse{}, err
 	}
 	if c.resourceAvailable(ctx, forecastlev1alpha1.GroupVersion, "ForecastleApp") {
-		if err := collectForecastleApps(ctx, c.reader, groups, groupDetails); err != nil {
+		if err := c.collectForecastleApps(ctx, groups, groupDetails); err != nil {
 			return DashboardResponse{}, err
 		}
 	}
@@ -241,13 +248,16 @@ func collectBookmarkGroups(ctx context.Context, c client.Reader, groups map[stri
 	return nil
 }
 
-func collectForecastleApps(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
+func (c *dashboardCollector) collectForecastleApps(ctx context.Context, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
 	var list forecastlev1alpha1.ForecastleAppList
-	if err := c.List(ctx, &list); err != nil {
+	if err := c.reader.List(ctx, &list); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 
 	for _, item := range list.Items {
+		if c.forecastleInstance != "" && strings.TrimSpace(item.Spec.Instance) != c.forecastleInstance {
+			continue
+		}
 		linkName := item.Spec.Name
 		groupName := resolveLinkGroupName(item.Spec.Group, groupDetails)
 		icon := item.Spec.Icon
@@ -260,7 +270,7 @@ func collectForecastleApps(ctx context.Context, c client.Reader, groups map[stri
 		if strings.TrimSpace(url) == "" {
 			source := parseForecastleURLSource(item.Spec.URLFrom)
 			if source != nil {
-				resolved, resolveErr := webhookdashboardv1alpha1.ResolveURLFromSource(ctx, c, item.GetNamespace(), source)
+				resolved, resolveErr := webhookdashboardv1alpha1.ResolveURLFromSource(ctx, c.reader, item.GetNamespace(), source)
 				if resolveErr == nil {
 					url = resolved
 				}

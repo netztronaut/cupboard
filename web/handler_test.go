@@ -431,6 +431,70 @@ func TestForecastleAppDisplayGroupMergesWithConfiguredLinkGroup(t *testing.T) {
 	}
 }
 
+func TestForecastleAppInstanceFilter(t *testing.T) {
+	t.Helper()
+
+	s := runtime.NewScheme()
+	if err := scheme.AddToScheme(s); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("add dashboard scheme: %v", err)
+	}
+	if err := forecastlev1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("add forecastle scheme: %v", err)
+	}
+
+	matching := &forecastlev1alpha1.ForecastleApp{
+		ObjectMeta: metav1.ObjectMeta{Name: "matching", Namespace: "default"},
+		Spec: forecastlev1alpha1.ForecastleAppSpec{
+			Name:     "Matching",
+			Instance: "cupboard",
+			Group:    "Apps",
+			Icon:     "fa-check",
+			URL:      "https://matching.example.com",
+		},
+	}
+	other := &forecastlev1alpha1.ForecastleApp{
+		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "default"},
+		Spec: forecastlev1alpha1.ForecastleAppSpec{
+			Name:     "Other",
+			Instance: "forecastle",
+			Group:    "Apps",
+			Icon:     "fa-xmark",
+			URL:      "https://other.example.com",
+		},
+	}
+	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).WithObjects(matching, other).Build(), stubDiscovery{
+		forecastlev1alpha1.GroupVersion.String(): {
+			APIResources: []metav1.APIResource{{Kind: "ForecastleApp"}},
+		},
+	}, Options{
+		Auth:       AuthOptions{Enabled: false},
+		Forecastle: ForecastleOptions{Instance: "cupboard"},
+	})
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload DashboardResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Groups) != 1 || len(payload.Groups[0].Links) != 1 {
+		t.Fatalf("expected one matching ForecastleApp link, got %+v", payload.Groups)
+	}
+	if got := payload.Groups[0].Links[0].Name; got != "Matching" {
+		t.Fatalf("expected matching instance link, got %q", got)
+	}
+}
+
 func TestLinkGroupOrderingByClassPriorityAndDisplayName(t *testing.T) {
 	t.Helper()
 

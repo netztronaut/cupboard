@@ -12,6 +12,10 @@ layout:
 - deploy-image.go.kubebuilder.io/v1-alpha
 multigroup: true
 namespaced: true
+plugins:
+  helm.kubebuilder.io/v2-alpha:
+    manifests: dist/install.yaml
+    output: dist
 projectName: cupboard
 repo: github.com/netztronaut/cupboard
 resources:

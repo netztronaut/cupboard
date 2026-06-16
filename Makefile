@@ -1,5 +1,8 @@
-# Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+# VERSION defines the release version. When HEAD is exactly tagged, the tag is used
+# without a leading "v"; otherwise it falls back to the chart's initial version.
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null | sed 's/^v//' || echo 0.1.0)
+# Image URL to use all building/pushing image targets.
+IMG ?= docker.io/netztronaut/cupboard:$(VERSION)
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -189,15 +192,15 @@ docker-build: ## Build docker image with the manager.
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
-# PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
+# PLATFORMS defines the target platforms for the manager image to support both common Linux
+# architectures. (i.e. make docker-buildx IMG=myregistry/myoperator:0.0.1). To use this option you need to:
 # - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+PLATFORMS ?= linux/amd64,linux/arm64
 .PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
+docker-buildx: ## Build and push linux/amd64 and linux/arm64 docker images for the manager.
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name cupboard-builder
@@ -319,3 +322,81 @@ endef
 define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
+
+##@ Helm Deployment
+
+## Helm binary to use for deploying the chart
+HELM ?= helm
+## Namespace to deploy the Helm release
+HELM_NAMESPACE ?= cupboard-system
+## Name of the Helm release
+HELM_RELEASE ?= cupboard
+## Path to the Helm chart directory
+HELM_CHART_DIR ?= dist/chart
+## Helm chart version. Must be a SemVer-compatible version.
+HELM_CHART_VERSION ?= $(VERSION)
+## Application version recorded in the packaged Helm chart.
+HELM_APP_VERSION ?= $(VERSION)
+## Destination directory for packaged Helm charts.
+HELM_PACKAGE_DIR ?= dist
+## OCI registry/repository prefix for Helm chart pushes.
+HELM_OCI_REGISTRY ?= oci://docker.io/netztronaut/charts
+## Packaged Helm chart archive path.
+HELM_PACKAGE ?= $(HELM_PACKAGE_DIR)/cupboard-$(HELM_CHART_VERSION).tgz
+## Additional arguments to pass to helm commands
+HELM_EXTRA_ARGS ?=
+
+.PHONY: install-helm
+install-helm: ## Install the latest version of Helm.
+	@command -v $(HELM) >/dev/null 2>&1 || { \
+		echo "Installing Helm..." && \
+		curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash; \
+	}
+
+.PHONY: helm-deploy
+helm-deploy: install-helm ## Deploy manager to the K8s cluster via Helm. Specify an image with IMG.
+	$(HELM) upgrade --install $(HELM_RELEASE) $(HELM_CHART_DIR) \
+		--namespace $(HELM_NAMESPACE) \
+		--create-namespace \
+		--set manager.image.repository=$${IMG%:*} \
+		--set manager.image.tag=$${IMG##*:} \
+		--wait \
+		--timeout 5m \
+		$(HELM_EXTRA_ARGS)
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall the Helm release from the K8s cluster.
+	$(HELM) uninstall $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)
+
+.PHONY: helm-status
+helm-status: ## Show Helm release status.
+	$(HELM) status $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)
+
+.PHONY: helm-history
+helm-history: ## Show Helm release history.
+	$(HELM) history $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)
+
+.PHONY: helm-rollback
+helm-rollback: ## Rollback to previous Helm release.
+	$(HELM) rollback $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)
+
+.PHONY: helm-package
+helm-package: install-helm ## Package the Helm chart with VERSION/HELM_CHART_VERSION.
+	mkdir -p "$(HELM_PACKAGE_DIR)"
+	$(HELM) package "$(HELM_CHART_DIR)" \
+		--destination "$(HELM_PACKAGE_DIR)" \
+		--version "$(HELM_CHART_VERSION)" \
+		--app-version "$(HELM_APP_VERSION)"
+
+.PHONY: helm-push-oci
+helm-push-oci: helm-package ## Push the packaged Helm chart to HELM_OCI_REGISTRY.
+	$(HELM) push "$(HELM_PACKAGE)" "$(HELM_OCI_REGISTRY)"
+
+##@ Release
+
+.PHONY: release
+release: ## Test, publish multi-arch image, build installer, package and push Helm chart.
+	$(MAKE) test
+	$(MAKE) docker-buildx IMG="$(IMG)"
+	$(MAKE) build-installer IMG="$(IMG)"
+	$(MAKE) helm-push-oci HELM_CHART_VERSION="$(HELM_CHART_VERSION)" HELM_APP_VERSION="$(HELM_APP_VERSION)"

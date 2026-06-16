@@ -19,6 +19,9 @@ auth:
   scopes: "openid profile email"
   cookieSecret: "replace-me"
 
+forecastle:
+  instance: "cupboard"
+
 dashboard:
   linkGroups:
     - name: "pinned"

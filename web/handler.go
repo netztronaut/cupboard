@@ -113,7 +113,7 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 		return nil, err
 	}
 	auth := newAuthService(options.Auth)
-	collector := newDashboardCollector(k8sClient, discovery, options.LinkGroups, options.StaticLinks)
+	collector := newDashboardCollector(k8sClient, discovery, options)
 	collector.logMissingOptionalResources(context.Background())
 	notifier := newDashboardUpdateNotifier(collector)
 	notifier.start(context.Background())

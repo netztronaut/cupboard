@@ -116,6 +116,7 @@ func loadViperConfig(configFile string) (*viper.Viper, error) {
 	_ = v.BindEnv("auth.redirectPath", "OIDC_REDIRECT_PATH")
 	_ = v.BindEnv("auth.scopes", "OIDC_SCOPES")
 	_ = v.BindEnv("auth.userInfoEndpoint", "OIDC_USERINFO_ENDPOINT")
+	_ = v.BindEnv("forecastle.instance", "CUPBOARD_FORECASTLE_INSTANCE")
 	_ = v.BindEnv("page.title", "CUPBOARD_PAGE_TITLE")
 	_ = v.BindEnv("page.faviconURL", "CUPBOARD_FAVICON_URL")
 	_ = v.BindEnv("page.templateSet", "CUPBOARD_TEMPLATE_SET")
@@ -178,6 +179,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var webAddr string
+	var forecastleInstance string
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var configFile string
@@ -203,6 +205,8 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.BoolVar(&enableAuth, "enable-auth", enableAuth,
 		"If set, API authentication is enabled. Can also be controlled via ENABLE_AUTH env var.")
+	flag.StringVar(&forecastleInstance, "forecastle-instance", "",
+		"Forecastle instance name used to filter ForecastleApp resources by spec.instance. Can also be controlled via CUPBOARD_FORECASTLE_INSTANCE env var.")
 	flag.StringVar(&configFile, "config", "", "Path to the cupboard configuration file (yaml/json/toml). Can also be set via CUPBOARD_CONFIG.")
 	opts := zap.Options{
 		Development: true,
@@ -230,6 +234,7 @@ func main() {
 	metricsCertKey = resolveStringFlag(config, setFlags, "metrics-cert-key", "metrics.cert.key", metricsCertKey)
 	enableHTTP2 = resolveBoolFlag(config, setFlags, "enable-http2", "http2.enabled", enableHTTP2)
 	enableAuth = resolveBoolFlag(config, setFlags, "enable-auth", "auth.enabled", enableAuth)
+	forecastleInstance = resolveStringFlag(config, setFlags, "forecastle-instance", "forecastle.instance", forecastleInstance)
 
 	localTesting := config.GetBool("localTesting")
 	enableWebhooks := true
@@ -397,6 +402,9 @@ func main() {
 			RedirectPath:        config.GetString("auth.redirectPath"),
 			Scopes:              config.GetString("auth.scopes"),
 			UserInfoEndpointURL: config.GetString("auth.userInfoEndpoint"),
+		},
+		Forecastle: web.ForecastleOptions{
+			Instance: forecastleInstance,
 		},
 		LinkGroups:  linkGroups,
 		StaticLinks: staticLinks,

@@ -76,6 +76,7 @@ The operator aggregates dashboard links from:
   - `group: forecastle.stakater.com`
   - `kind: ForecastleApp`
   - `version: v1alpha1`
+  - optional `spec.instance` filtering via `--forecastle-instance`, `CUPBOARD_FORECASTLE_INSTANCE`, or `forecastle.instance` in config
 - labeled and annotated 3rd party resources (`Ingress`, `HTTPRoute`, `Service`)
 
 For 3rd party resources, set:
@@ -114,6 +115,9 @@ page:
   title: "cupboard"
   faviconURL: "/favicon.svg"
   contentLayout: "grid"
+
+forecastle:
+  instance: "cupboard"
 
 dashboard:
   linkGroups:
@@ -172,6 +176,22 @@ The web UI reads aggregated dashboard data from `GET /api/dashboard` and listens
 ```sh
 make docker-build docker-push IMG=<some-registry>/cupboard:tag
 ```
+
+For a multi-platform image supporting both `linux/amd64` and `linux/arm64`, use:
+
+```sh
+make docker-buildx IMG=<some-registry>/cupboard:tag
+```
+
+For a full release, set `VERSION` and the Helm OCI destination:
+
+```sh
+make release VERSION=1.2.3 \
+  IMG=docker.io/netztronaut/cupboard:1.2.3 \
+  HELM_OCI_REGISTRY=oci://docker.io/netztronaut/charts
+```
+
+`VERSION` is the release version. It defaults to the exact Git tag on `HEAD` without a leading `v` (for example `v1.2.3` becomes `1.2.3`), or `0.1.0` when `HEAD` is not exactly tagged. The same value is used by default for the image tag, Helm chart version, and Helm app version; override `IMG`, `HELM_CHART_VERSION`, or `HELM_APP_VERSION` when they need to differ.
 
 **NOTE:** This image ought to be published in the personal registry you specified.
 And it is required to have access to pull the image from the working environment.
@@ -256,6 +276,12 @@ kubebuilder edit --plugins=helm/v2-alpha
 
 2. See that a chart was generated under 'dist/chart', and users
 can obtain this solution from there.
+
+Package and push the chart to an OCI registry with:
+
+```sh
+make helm-push-oci VERSION=1.2.3 HELM_OCI_REGISTRY=oci://docker.io/netztronaut/charts
+```
 
 **NOTE:** If you change the project, you need to update the Helm Chart
 using the same command above to sync the latest changes. Furthermore,

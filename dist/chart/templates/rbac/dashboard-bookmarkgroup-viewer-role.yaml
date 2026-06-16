@@ -1,0 +1,27 @@
+{{- if .Values.rbac.helpers.enable }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "cupboard.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "cupboard.resourceName" (dict "suffix" "dashboard-bookmarkgroup-viewer-role" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+rules:
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - bookmarkgroups
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - bookmarkgroups/status
+  verbs:
+  - get
+{{- end }}

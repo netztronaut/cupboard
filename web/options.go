@@ -2,6 +2,7 @@ package web
 
 type Options struct {
 	Auth        AuthOptions
+	Forecastle  ForecastleOptions
 	LinkGroups  []LinkGroup
 	StaticLinks []StaticLink
 	Page        PageOptions
@@ -15,6 +16,10 @@ type AuthOptions struct {
 	RedirectPath        string
 	Scopes              string
 	UserInfoEndpointURL string
+}
+
+type ForecastleOptions struct {
+	Instance string
 }
 
 type StaticLink struct {
