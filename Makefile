@@ -164,12 +164,14 @@ setup-kind: ## Set up a Kind cluster for LOCAL_TESTING if it does not exist
 deploy-manager-local-testing: ## Deploy manager to local-testing with webhooks enabled
 	@echo "Deploying manager with webhooks enabled..."
 	$(KUBECTL) apply -k config/local-testing/ --context $(LOCAL_TESTING_KIND_CONTEXT)
+	$(KUBECTL) set image deployment/controller-manager manager=$(IMG) -n local-testing --context $(LOCAL_TESTING_KIND_CONTEXT)
+	$(KUBECTL) rollout restart deployment/controller-manager -n local-testing --context $(LOCAL_TESTING_KIND_CONTEXT)
 	@if $(KUBECTL) get service authentik-server -n authentik --context $(LOCAL_TESTING_KIND_CONTEXT) >/dev/null 2>&1; then \
 		$(KUBECTL) apply -f config/local-testing/authentik_ingressroute.yaml --context $(LOCAL_TESTING_KIND_CONTEXT); \
 		KUBECTL="$(KUBECTL)" KUBECTL_CONTEXT="$(LOCAL_TESTING_KIND_CONTEXT)" bash hack/configure-authentik-local-testing.sh; \
 	fi
 	@echo "Waiting for manager deployment to be ready (this may take a moment)..."
-	$(KUBECTL) wait --for=condition=available --timeout=120s deployment/controller-manager -n local-testing --context $(LOCAL_TESTING_KIND_CONTEXT)
+	$(KUBECTL) rollout status deployment/controller-manager -n local-testing --timeout=120s --context $(LOCAL_TESTING_KIND_CONTEXT)
 	@echo "Manager is ready!"
 
 .PHONY: web-build
