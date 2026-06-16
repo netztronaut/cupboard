@@ -12,7 +12,7 @@ The repository module is `github.com/netztronaut/cupboard`, and APIs use the `ne
 ## Description
 The operator binary embeds a React/TypeScript web interface built from `web/` and serves it on `--web-bind-address` (default `:8082`).
 
-The root webpage (`/`) is rendered from template partials, and dashboard links are loaded client-side from `GET /api/dashboard`. A template set contains:
+The binary includes server-side dashboard template partials. A template set contains:
 
 1. page template
 2. header template
@@ -24,7 +24,14 @@ The root webpage (`/`) is rendered from template partials, and dashboard links a
 Built-in template sets:
 
 - `default` (`web/templates/default/`)
-- `forecastle-grid` (`web/templates/forecastle-grid/`)
+- `forecastle` (`web/templates/forecastle/`)
+
+When a template set is loaded, each template file is resolved independently in this order:
+
+1. `templates/<set>/<template-name>.tmpl` on the filesystem next to the manager binary
+2. `templates/<set>/<template-name>.tmpl` from the embedded filesystem
+3. `templates/default/<template-name>.tmpl` from the embedded filesystem
+4. fail if none of those files exist
 
 Icon libraries are embedded and served from local static assets (no external CDN dependency):
 

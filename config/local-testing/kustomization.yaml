@@ -14,6 +14,19 @@ resources:
   - cupboard_web.yaml
   - metrics_service.yaml
 
+configMapGenerator:
+  - name: cupboard-config
+    files:
+      - cupboard.yaml
+  - name: custom-theme
+    files:
+      - page.tmpl=templates/custom-theme/page.tmpl
+      - header.tmpl=templates/custom-theme/header.tmpl
+      - footer.tmpl=templates/custom-theme/footer.tmpl
+      - content.tmpl=templates/custom-theme/content.tmpl
+      - group.tmpl=templates/custom-theme/group.tmpl
+      - link.tmpl=templates/custom-theme/link.tmpl
+
 # Override namespace for local testing
 namespace: local-testing
 
@@ -33,6 +46,8 @@ patches:
             value: "true"
           - name: ENABLE_AUTH
             value: "true"
+          - name: CUPBOARD_CONFIG
+            value: /etc/cupboard/cupboard.yaml
           - name: CUPBOARD_COOKIE_SECRET
             value: local-testing-cookie-secret-change-me
           - name: OIDC_ISSUER_URL
@@ -45,6 +60,8 @@ patches:
             value: openid profile email
           - name: OIDC_USERINFO_ENDPOINT
             value: http://authentik-server.authentik.svc.cluster.local/application/o/userinfo/
+          - name: CUPBOARD_TEMPLATE_SET
+            value: custom-theme
       - op: replace
         path: /spec/template/spec/containers/0/image
         value: controller:latest
@@ -69,16 +86,40 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/volumeMounts/-
         value:
+          mountPath: /etc/cupboard
+          name: cupboard-config
+          readOnly: true
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
           mountPath: /tmp/k8s-webhook-server/serving-certs
           name: webhook-certs
           readOnly: true
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          mountPath: /templates/custom-theme
+          name: custom-theme
+          readOnly: true
       # Add webhook certificate volume (from pre-generated secret)
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: cupboard-config
+          configMap:
+            name: cupboard-config
       - op: add
         path: /spec/template/spec/volumes/-
         value:
           name: webhook-certs
           secret:
             secretName: webhook-server-cert
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: custom-theme
+          configMap:
+            name: custom-theme
       # Remove read-only filesystem restriction for webhook certs
       - op: remove
         path: /spec/template/spec/containers/0/securityContext/readOnlyRootFilesystem

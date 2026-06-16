@@ -3,6 +3,11 @@ import type { User } from 'oidc-client-ts'
 import './App.css'
 import { clearUserSession, currentUser, getAuthConfig, handleAuthCallback, loginWithPKCE } from './auth'
 
+const AUTO_SIGN_IN_FAILURE_LIMIT = 3
+const AUTO_SIGN_IN_FAILURE_COUNT_KEY = 'cupboard.auth.autoSignInFailures'
+
+let autoSignInPromise: Promise<void> | undefined
+
 type DashboardLink = {
   name: string
   url: string
@@ -18,6 +23,31 @@ type DashboardGroup = {
 
 type DashboardResponse = {
   groups: DashboardGroup[]
+}
+
+function autoSignInFailureCount(): number {
+  const value = window.sessionStorage.getItem(AUTO_SIGN_IN_FAILURE_COUNT_KEY)
+  if (!value) {
+    return 0
+  }
+  const count = Number.parseInt(value, 10)
+  return Number.isFinite(count) && count > 0 ? count : 0
+}
+
+function recordAutoSignInFailure(): number {
+  const count = autoSignInFailureCount() + 1
+  window.sessionStorage.setItem(AUTO_SIGN_IN_FAILURE_COUNT_KEY, String(count))
+  return count
+}
+
+function resetAutoSignInFailures() {
+  window.sessionStorage.removeItem(AUTO_SIGN_IN_FAILURE_COUNT_KEY)
+}
+
+function autoSignInLoopError(): Error {
+  return new Error(
+    `automatic sign-in failed ${AUTO_SIGN_IN_FAILURE_LIMIT} times in a row; not redirecting again to avoid a sign-in loop`,
+  )
 }
 
 function App() {
@@ -60,6 +90,49 @@ function App() {
     }
   }
 
+  const loadBackendSessionSubject = async (): Promise<boolean> => {
+    const response = await fetch('/api/session', {
+      credentials: 'include',
+    })
+    if (!response.ok) {
+      return false
+    }
+    const session = (await response.json()) as { userInfo?: Record<string, unknown> }
+    const sub = session.userInfo?.sub
+    if (typeof sub === 'string') {
+      setSubject(sub)
+    }
+    return true
+  }
+
+  const validCurrentUser = async (): Promise<User | null> => {
+    const user = await currentUser()
+    if (user?.expired) {
+      await clearUserSession()
+      return null
+    }
+    return user
+  }
+
+  const startAutomaticSignIn = async () => {
+    if (autoSignInFailureCount() >= AUTO_SIGN_IN_FAILURE_LIMIT) {
+      throw autoSignInLoopError()
+    }
+    if (autoSignInPromise) {
+      return autoSignInPromise
+    }
+    autoSignInPromise = (async () => {
+      await loginWithPKCE()
+    })().catch((err: unknown) => {
+      autoSignInPromise = undefined
+      if (recordAutoSignInFailure() >= AUTO_SIGN_IN_FAILURE_LIMIT) {
+        throw autoSignInLoopError()
+      }
+      throw err
+    })
+    return autoSignInPromise
+  }
+
   useEffect(() => {
     ;(async () => {
       try {
@@ -71,29 +144,52 @@ function App() {
           return
         }
 
-        const isCallback = window.location.pathname === '/auth/callback'
+        const redirectPath = authConfig.redirectPath || '/auth/callback'
+        const isCallback = window.location.pathname === redirectPath
+        let user: User | null = null
+
         if (isCallback) {
-          await handleAuthCallback()
+          try {
+            user = await handleAuthCallback()
+          } catch {
+            window.history.replaceState({}, '', '/')
+            if (recordAutoSignInFailure() >= AUTO_SIGN_IN_FAILURE_LIMIT) {
+              throw autoSignInLoopError()
+            }
+            await startAutomaticSignIn()
+            return
+          }
           window.history.replaceState({}, '', '/')
+        } else {
+          user = await validCurrentUser()
         }
 
-        const user = await currentUser()
-        await authenticateBackend(user)
+        if (user) {
+          try {
+            await authenticateBackend(user)
+          } catch {
+            await clearUserSession()
+            if (recordAutoSignInFailure() >= AUTO_SIGN_IN_FAILURE_LIMIT) {
+              throw autoSignInLoopError()
+            }
+            await startAutomaticSignIn()
+            return
+          }
+          resetAutoSignInFailures()
+          window.location.replace('/')
+          return
+        }
 
         if (!user) {
-          const response = await fetch('/api/session', {
-            credentials: 'include',
-          })
-          if (response.ok) {
-            const session = (await response.json()) as { userInfo?: Record<string, unknown> }
-            const sub = session.userInfo?.sub
-            if (typeof sub === 'string') {
-              setSubject(sub)
-            }
+          if (await loadBackendSessionSubject()) {
+            resetAutoSignInFailures()
+            window.location.replace('/')
+            return
           }
+          await startAutomaticSignIn()
+          return
         }
 
-        await fetchDashboard(user?.access_token)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
@@ -102,25 +198,6 @@ function App() {
       }
     })()
   }, [])
-
-  const onLogin = async () => {
-    try {
-      await loginWithPKCE()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      setError(message)
-    }
-  }
-
-  const onLogout = async () => {
-    await clearUserSession()
-    await fetch('/api/session', {
-      method: 'DELETE',
-      credentials: 'include',
-    })
-    setGroups([])
-    setSubject(undefined)
-  }
 
   const isImageIcon = (icon?: string) =>
     !!icon &&
@@ -140,12 +217,13 @@ function App() {
           {!authEnabled ? (
             <small>authentication disabled</small>
           ) : subject ? (
-            <>
-              <small>signed in as {subject}</small>
-              <button onClick={onLogout}>Log out</button>
-            </>
+            <small>signed in as {subject}</small>
+          ) : loading ? (
+            <small>signing in…</small>
+          ) : error ? (
+            <small>sign-in unavailable</small>
           ) : (
-            <button onClick={onLogin}>Sign in (PKCE)</button>
+            <small>sign-in required</small>
           )}
         </div>
       </header>

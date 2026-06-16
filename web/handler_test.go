@@ -24,7 +24,7 @@ func (s stubDiscovery) ServerResourcesForGroupVersion(groupVersion string) (*met
 	return &metav1.APIResourceList{}, nil
 }
 
-func TestRootDocumentInjectsDisabledAuthConfig(t *testing.T) {
+func TestIndexDocumentInjectsDisabledAuthConfig(t *testing.T) {
 	t.Helper()
 
 	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{Auth: AuthOptions{Enabled: false}})
@@ -32,7 +32,7 @@ func TestRootDocumentInjectsDisabledAuthConfig(t *testing.T) {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -41,7 +41,7 @@ func TestRootDocumentInjectsDisabledAuthConfig(t *testing.T) {
 		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
 	}
 	if !strings.Contains(rr.Body.String(), `<script>window.config = {"enabled":false};</script>`) {
-		t.Fatalf("root document does not contain disabled auth config: %s", rr.Body.String())
+		t.Fatalf("index document does not contain disabled auth config: %s", rr.Body.String())
 	}
 }
 
@@ -315,7 +315,7 @@ func TestLinkGroupOrderingByClassPriorityAndDisplayName(t *testing.T) {
 	}
 }
 
-func TestRootPageServesSPAIndexWithInjectedAuthConfig(t *testing.T) {
+func TestRootPageServesSelectedTemplate(t *testing.T) {
 	t.Helper()
 
 	s := runtime.NewScheme()
@@ -353,14 +353,11 @@ func TestRootPageServesSPAIndexWithInjectedAuthConfig(t *testing.T) {
 		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, `<div id="root"></div>`) {
-		t.Fatalf("expected SPA root container in page: %s", body)
+	if !strings.Contains(body, "My Cupboard") || !strings.Contains(body, "content--grid") || !strings.Contains(body, "/custom.ico") {
+		t.Fatalf("expected selected template page options: %s", body)
 	}
-	if !strings.Contains(body, `<script>window.config = {"enabled":false};</script>`) {
-		t.Fatalf("expected injected auth config in page: %s", body)
-	}
-	if strings.Contains(body, "My Cupboard") || strings.Contains(body, "content--grid") || strings.Contains(body, "/custom.ico") {
-		t.Fatalf("expected npm-built SPA index instead of legacy page template: %s", body)
+	if strings.Contains(body, `<div id="root"></div>`) || strings.Contains(body, `window.config`) {
+		t.Fatalf("expected template page instead of SPA index: %s", body)
 	}
 }
 
@@ -384,7 +381,7 @@ func TestIndexHTMLPathUsesInjectedSPAIndex(t *testing.T) {
 	}
 }
 
-func TestRootPageTemplateSetDoesNotReplaceSPAIndex(t *testing.T) {
+func TestRootPageUsesTemplateSet(t *testing.T) {
 	t.Helper()
 
 	s := runtime.NewScheme()
@@ -419,10 +416,42 @@ func TestRootPageTemplateSetDoesNotReplaceSPAIndex(t *testing.T) {
 		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, `<div id="root"></div>`) {
-		t.Fatalf("expected SPA root container in page: %s", body)
+	if !strings.Contains(body, `class="fc-header"`) || !strings.Contains(body, `class="container fc-groups"`) {
+		t.Fatalf("expected forecastle template page: %s", body)
 	}
-	if strings.Contains(body, `class="fc-header"`) || strings.Contains(body, `class="container fc-groups"`) {
-		t.Fatalf("expected forecastle template not to replace SPA index: %s", body)
+}
+
+func TestRootPageWithAuthAndNoSessionServesSPAIndex(t *testing.T) {
+	t.Helper()
+
+	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{
+		Auth: AuthOptions{
+			Enabled:      true,
+			IssuerURL:    "https://issuer.example",
+			ClientID:     "cupboard",
+			CookieSecret: "test-secret",
+		},
+		Page: PageOptions{
+			TemplateSet: "forecastle",
+			Title:       "Forecastle",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `<div id="root"></div>`) {
+		t.Fatalf("expected SPA root container for auth bootstrap: %s", body)
+	}
+	if strings.Contains(body, `class="fc-header"`) {
+		t.Fatalf("expected SPA index instead of template without an auth session: %s", body)
 	}
 }

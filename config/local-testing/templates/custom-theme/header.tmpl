@@ -1,0 +1,20 @@
+{{define "header"}}
+<header class="fc-header">
+  <div class="container fc-toolbar">
+    <div class="fc-brand">
+      <span class="fc-brand-mark"><i class="fa-solid fa-cube" aria-hidden="true"></i></span>
+      <h1 class="fc-brand-title">{{.Title}}</h1>
+    </div>
+    <label class="fc-search" aria-label="Search applications">
+      <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+      <input id="fc-search-input" type="search" placeholder="Search apps..." />
+      <span class="search-shortcut">⌘K</span>
+    </label>
+    <div class="fc-toolbar-right">
+      <button id="fc-theme-toggle" class="fc-theme-toggle" type="button" aria-label="Theme: system">
+        <i id="fc-theme-icon" class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i>
+      </button>
+    </div>
+  </div>
+</header>
+{{end}}

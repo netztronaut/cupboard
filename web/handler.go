@@ -117,6 +117,10 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 	collector.logMissingOptionalResources(context.Background())
 	notifier := newDashboardUpdateNotifier(collector)
 	notifier.start(context.Background())
+	pageTemplate, err := loadPageTemplate(options.Page.TemplateSet)
+	if err != nil {
+		return nil, err
+	}
 	fileServer := http.FileServer(http.FS(frontendFS))
 	staticServer := http.FileServer(http.FS(staticFS))
 	mux := http.NewServeMux()
@@ -261,11 +265,42 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(index)
 	})
+	pageTemplateHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		if auth.enabled {
+			if _, err := auth.userInfoFromCookie(r); err != nil {
+				frontendIndexHandler.ServeHTTP(w, r)
+				return
+			}
+		}
+		var groups []DashboardGroup
+		if dashboard, collectErr := collector.collectDashboard(r.Context()); collectErr == nil {
+			groups = dashboard.Groups
+		} else {
+			setupLog.Error(collectErr, "Could not collect dashboard for template render")
+		}
+		data := pageTemplateData{
+			Title:         firstNonEmptyString(options.Page.Title, "cupboard"),
+			FaviconURL:    options.Page.FaviconURL,
+			ContentLayout: firstNonEmptyString(options.Page.ContentLayout, "list"),
+			Groups:        groups,
+		}
+		var body bytes.Buffer
+		if err := pageTemplate.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(body.Bytes())
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cleanPath := path.Clean(r.URL.Path)
 		if cleanPath == "." || cleanPath == "/" {
-			frontendIndexHandler.ServeHTTP(w, r)
+			pageTemplateHandler.ServeHTTP(w, r)
 			return
 		}
 

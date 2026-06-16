@@ -2,9 +2,14 @@ package web
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -12,6 +17,10 @@ import (
 
 //go:embed templates/**/*.tmpl
 var templateFS embed.FS
+
+var pageTemplateFileNames = []string{"page", "header", "footer", "content", "group", "link"}
+
+var filesystemTemplateFS = managerDirectoryFS()
 
 type pageTemplate struct {
 	tmpl *template.Template
@@ -33,7 +42,7 @@ func loadPageTemplate(set string) (*pageTemplate, error) {
 		selectedSet = "default"
 	}
 
-	parsed, err := template.New("page").Funcs(template.FuncMap{
+	parsed := template.New("page").Funcs(template.FuncMap{
 		"isFontAwesomeKey": func(value string) bool {
 			return strings.HasPrefix(strings.TrimSpace(value), "fa-")
 		},
@@ -83,17 +92,84 @@ func loadPageTemplate(set string) (*pageTemplate, error) {
 				return ""
 			}
 		},
-	}).ParseFS(templateFS,
-		fmt.Sprintf("templates/%s/page.tmpl", selectedSet),
-		fmt.Sprintf("templates/%s/header.tmpl", selectedSet),
-		fmt.Sprintf("templates/%s/footer.tmpl", selectedSet),
-		fmt.Sprintf("templates/%s/content.tmpl", selectedSet),
-		fmt.Sprintf("templates/%s/group.tmpl", selectedSet),
-		fmt.Sprintf("templates/%s/link.tmpl", selectedSet),
-	)
+	})
+	for _, name := range pageTemplateFileNames {
+		contents, err := readPageTemplateFile(selectedSet, name)
+		if err != nil {
+			return nil, err
+		}
+		target := parsed
+		if name != "page" {
+			target = parsed.New("_" + name)
+		}
+		if _, err := target.Parse(string(contents)); err != nil {
+			return nil, fmt.Errorf("parse template %q from set %q: %w", name, selectedSet, err)
+		}
+	}
+
+	return &pageTemplate{tmpl: parsed, set: selectedSet}, nil
+}
+
+func readPageTemplateFile(set, name string) ([]byte, error) {
+	selectedPath, err := pageTemplatePath(set, name)
+	if err != nil {
+		return nil, err
+	}
+	defaultPath, err := pageTemplatePath("default", name)
 	if err != nil {
 		return nil, err
 	}
 
-	return &pageTemplate{tmpl: parsed, set: selectedSet}, nil
+	candidates := []struct {
+		source string
+		fsys   fs.FS
+		path   string
+	}{
+		{source: "filesystem", fsys: filesystemTemplateFS, path: selectedPath},
+		{source: "embedded selected set", fsys: templateFS, path: selectedPath},
+	}
+	if selectedPath != defaultPath {
+		candidates = append(candidates, struct {
+			source string
+			fsys   fs.FS
+			path   string
+		}{source: "embedded default set", fsys: templateFS, path: defaultPath})
+	}
+
+	for _, candidate := range candidates {
+		contents, err := fs.ReadFile(candidate.fsys, candidate.path)
+		if err == nil {
+			return contents, nil
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		return nil, fmt.Errorf("read %s template %q: %w", candidate.source, candidate.path, err)
+	}
+
+	return nil, fmt.Errorf("template %q not found in filesystem set %q, embedded set %q, or embedded default set", name, set, set)
+}
+
+func managerDirectoryFS() fs.FS {
+	executable, err := os.Executable()
+	if err != nil {
+		return os.DirFS(".")
+	}
+	return os.DirFS(filepath.Dir(executable))
+}
+
+func pageTemplatePath(set, name string) (string, error) {
+	if strings.Contains(set, `\`) {
+		return "", fmt.Errorf("template set %q must use slash-separated paths", set)
+	}
+	for _, part := range strings.Split(set, "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", fmt.Errorf("template set %q contains an invalid path segment", set)
+		}
+	}
+	templatePath := path.Join("templates", set, name+".tmpl")
+	if !strings.HasPrefix(templatePath, "templates/") {
+		return "", fmt.Errorf("template path %q escapes templates directory", templatePath)
+	}
+	return templatePath, nil
 }
