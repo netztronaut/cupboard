@@ -93,6 +93,11 @@ type BookmarkLink struct {
 	// +optional
 	NetworkRestricted bool `json:"networkRestricted,omitempty"`
 
+	// Groups restricts this link to users who belong to at least one listed group.
+	// When omitted, the link is visible to every user.
+	// +optional
+	Groups []string `json:"groups,omitempty"`
+
 	// Properties allows free-form metadata, compatible with Forecastle.
 	// +optional
 	Properties map[string]string `json:"properties,omitempty"`

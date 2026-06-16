@@ -66,6 +66,8 @@ dashboard:
       url: "https://github.com"
       target: "_blank"
       icon: "fa-github"
+      groups:
+        - "developers"
     - linkGroup: "code-devops"
       name: "GitLab"
       url: "https://gitlab.com"

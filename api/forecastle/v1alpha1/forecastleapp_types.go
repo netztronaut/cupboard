@@ -32,6 +32,8 @@ type ForecastleAppSpec struct {
 	// +optional
 	NetworkRestricted bool `json:"networkRestricted,omitempty"`
 	// +optional
+	Groups []string `json:"groups,omitempty"`
+	// +optional
 	Properties map[string]string `json:"properties,omitempty"`
 }
 

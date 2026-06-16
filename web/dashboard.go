@@ -46,6 +46,8 @@ const (
 	annotationTarget  = "cupboard.netztronaut.de/target"
 	annotationIcon    = "cupboard.netztronaut.de/icon"
 	annotationIconURL = "cupboard.netztronaut.de/icon-url"
+
+	allLinkGroupsWildcard = "\x00all-link-groups"
 )
 
 type DashboardResponse struct {
@@ -67,16 +69,17 @@ type DashboardLinkGroup struct {
 }
 
 type DashboardLink struct {
-	Name      string `json:"name"`
-	LinkGroup string `json:"linkGroup,omitempty"`
-	URL       string `json:"url"`
-	Target    string `json:"target,omitempty"`
-	Icon      string `json:"icon,omitempty"`
-	Source    string `json:"source,omitempty"`
-	Metadata  string `json:"metadata,omitempty"`
+	Name      string   `json:"name"`
+	LinkGroup string   `json:"linkGroup,omitempty"`
+	URL       string   `json:"url"`
+	Target    string   `json:"target,omitempty"`
+	Icon      string   `json:"icon,omitempty"`
+	Source    string   `json:"source,omitempty"`
+	Metadata  string   `json:"metadata,omitempty"`
+	Groups    []string `json:"groups,omitempty"`
 }
 
-func (c *dashboardCollector) collectDashboard(ctx context.Context) (DashboardResponse, error) {
+func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []string) (DashboardResponse, error) {
 	groups := map[string][]DashboardLink{}
 	groupDetails := c.initLinkGroups()
 	c.collectStaticLinks(groups, groupDetails)
@@ -109,7 +112,7 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context) (DashboardRes
 		Groups:     make([]DashboardGroup, 0, len(orderedGroups)),
 	}
 	for _, group := range orderedGroups {
-		links := groups[group.Name]
+		links := filterLinksForGroups(groups[group.Name], userGroups)
 		if len(links) == 0 {
 			continue
 		}
@@ -148,7 +151,7 @@ func (c *dashboardCollector) initLinkGroups() map[string]DashboardLinkGroup {
 
 func (c *dashboardCollector) collectStaticLinks(groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) {
 	for _, link := range c.staticLinks {
-		groupName := firstNonEmpty(strings.TrimSpace(link.LinkGroup), strings.TrimSpace(link.Group))
+		groupName := resolveLinkGroupName(firstNonEmpty(strings.TrimSpace(link.LinkGroup), strings.TrimSpace(link.Group)), groupDetails)
 		name := strings.TrimSpace(link.Name)
 		url := strings.TrimSpace(link.URL)
 		if groupName == "" || name == "" || url == "" {
@@ -161,6 +164,7 @@ func (c *dashboardCollector) collectStaticLinks(groups map[string][]DashboardLin
 			Target: defaultTarget(link.Target),
 			Icon:   strings.TrimSpace(link.Icon),
 			Source: "static",
+			Groups: normalizedGroups(link.Groups),
 		})
 	}
 }
@@ -230,6 +234,7 @@ func collectBookmarkGroups(ctx context.Context, c client.Reader, groups map[stri
 				Target: target,
 				Icon:   link.Icon,
 				Source: "bookmarkgroup",
+				Groups: normalizedGroups(link.Groups),
 			})
 		}
 	}
@@ -244,7 +249,7 @@ func collectForecastleApps(ctx context.Context, c client.Reader, groups map[stri
 
 	for _, item := range list.Items {
 		linkName := item.Spec.Name
-		groupName := item.Spec.Group
+		groupName := resolveLinkGroupName(item.Spec.Group, groupDetails)
 		icon := item.Spec.Icon
 		target := "_self"
 		if v := item.Spec.Properties["target"]; strings.TrimSpace(v) != "" {
@@ -271,6 +276,7 @@ func collectForecastleApps(ctx context.Context, c client.Reader, groups map[stri
 			Target: target,
 			Icon:   icon,
 			Source: "forecastleapp",
+			Groups: normalizedGroups(item.Spec.Groups),
 		})
 	}
 	return nil
@@ -292,6 +298,22 @@ func parseForecastleURLSource(source *forecastlev1alpha1.URLSource) *dashboardv1
 		IngressRouteRef: parse(source.IngressRouteRef),
 		HTTPRouteRef:    parse(source.HTTPRouteRef),
 	}
+}
+
+func resolveLinkGroupName(raw string, groupDetails map[string]DashboardLinkGroup) string {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return ""
+	}
+	if _, ok := groupDetails[name]; ok {
+		return name
+	}
+	for key, details := range groupDetails {
+		if strings.EqualFold(strings.TrimSpace(details.DisplayName), name) || strings.EqualFold(key, name) {
+			return key
+		}
+	}
+	return name
 }
 
 func collectIngresses(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
@@ -422,6 +444,38 @@ func ensureLinkGroup(groups map[string]DashboardLinkGroup, name string) {
 		Name:        name,
 		DisplayName: name,
 	}
+}
+
+func filterLinksForGroups(links []DashboardLink, userGroups []string) []DashboardLink {
+	groupSet := map[string]struct{}{}
+	for _, group := range userGroups {
+		group = strings.TrimSpace(group)
+		if group != "" {
+			groupSet[group] = struct{}{}
+		}
+	}
+	result := make([]DashboardLink, 0, len(links))
+	for _, link := range links {
+		if linkAllowedForGroups(link, groupSet) {
+			result = append(result, link)
+		}
+	}
+	return result
+}
+
+func linkAllowedForGroups(link DashboardLink, userGroups map[string]struct{}) bool {
+	if len(link.Groups) == 0 {
+		return true
+	}
+	if _, ok := userGroups[allLinkGroupsWildcard]; ok {
+		return true
+	}
+	for _, requiredGroup := range link.Groups {
+		if _, ok := userGroups[requiredGroup]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func sortLinkGroups(groups map[string]DashboardLinkGroup) []DashboardLinkGroup {

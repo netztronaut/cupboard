@@ -30,6 +30,12 @@ type authContextKey struct{}
 type sessionPayload struct {
 	ExpiresAt int64                  `json:"expiresAt"`
 	UserInfo  map[string]interface{} `json:"userInfo"`
+	Groups    []string               `json:"groups,omitempty"`
+}
+
+type authSession struct {
+	UserInfo map[string]interface{} `json:"userInfo"`
+	Groups   []string               `json:"groups,omitempty"`
 }
 
 type authService struct {
@@ -105,6 +111,54 @@ func (a *authService) authConfig(ctx context.Context, requestIssuerURL string) a
 	}
 }
 
+func newAuthSession(userInfo map[string]interface{}) authSession {
+	return authSession{
+		UserInfo: userInfo,
+		Groups:   userGroupsFromUserInfo(userInfo),
+	}
+}
+
+func userGroupsFromUserInfo(userInfo map[string]interface{}) []string {
+	if userInfo == nil {
+		return nil
+	}
+	return normalizedGroups(userInfo["groups"])
+}
+
+func normalizedGroups(raw interface{}) []string {
+	seen := map[string]struct{}{}
+	var groups []string
+	add := func(group string) {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			return
+		}
+		if _, ok := seen[group]; ok {
+			return
+		}
+		seen[group] = struct{}{}
+		groups = append(groups, group)
+	}
+
+	switch value := raw.(type) {
+	case []string:
+		for _, group := range value {
+			add(group)
+		}
+	case []interface{}:
+		for _, item := range value {
+			if group, ok := item.(string); ok {
+				add(group)
+			}
+		}
+	case string:
+		for _, group := range strings.Split(value, ",") {
+			add(group)
+		}
+	}
+	return groups
+}
+
 func (a *authService) serveOpenIDConfiguration(w http.ResponseWriter, r *http.Request) {
 	if !a.enabled {
 		http.NotFound(w, r)
@@ -171,39 +225,44 @@ func (a *authService) serveOpenIDConfiguration(w http.ResponseWriter, r *http.Re
 	proxy.ServeHTTP(w, r)
 }
 
-func (a *authService) authenticateRequest(ctx context.Context, r *http.Request, w http.ResponseWriter) (map[string]interface{}, error) {
+func (a *authService) authenticateRequest(ctx context.Context, r *http.Request, w http.ResponseWriter) (authSession, error) {
 	if !a.enabled {
-		return map[string]interface{}{"sub": "anonymous"}, nil
+		return authSession{UserInfo: map[string]interface{}{"sub": "anonymous"}}, nil
 	}
 	token := bearerTokenFromRequest(r)
 	if token != "" {
 		userInfo, err := a.fetchUserInfo(ctx, token)
 		if err != nil {
-			return nil, err
+			return authSession{}, err
 		}
-		a.setSessionCookie(w, userInfo)
-		return userInfo, nil
+		session := newAuthSession(userInfo)
+		a.setSessionCookie(w, session)
+		return session, nil
 	}
 	return a.userInfoFromCookie(r)
 }
 
-func (a *authService) userInfoFromCookie(r *http.Request) (map[string]interface{}, error) {
+func (a *authService) userInfoFromCookie(r *http.Request) (authSession, error) {
 	cookie, err := r.Cookie(a.cookieName)
 	if err != nil {
-		return nil, err
+		return authSession{}, err
 	}
 	payloadJSON, err := verifySignedCookie(cookie.Value, a.secret)
 	if err != nil {
-		return nil, err
+		return authSession{}, err
 	}
 	var payload sessionPayload
 	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
-		return nil, err
+		return authSession{}, err
 	}
 	if time.Now().Unix() > payload.ExpiresAt {
-		return nil, errors.New("session cookie expired")
+		return authSession{}, errors.New("session cookie expired")
 	}
-	return payload.UserInfo, nil
+	groups := payload.Groups
+	if len(groups) == 0 {
+		groups = userGroupsFromUserInfo(payload.UserInfo)
+	}
+	return authSession{UserInfo: payload.UserInfo, Groups: groups}, nil
 }
 
 func (a *authService) fetchUserInfo(ctx context.Context, token string) (map[string]interface{}, error) {
@@ -229,6 +288,7 @@ func (a *authService) fetchUserInfo(ctx context.Context, token string) (map[stri
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
 		return nil, err
 	}
+	setupLog.WithName("auth").Info("Fetched userinfo", "userinfo", userInfo)
 	return userInfo, nil
 }
 
@@ -278,10 +338,11 @@ func (a *authService) userInfoEndpoint(ctx context.Context) (string, error) {
 	return discovery.UserInfoEndpoint, nil
 }
 
-func (a *authService) setSessionCookie(w http.ResponseWriter, userInfo map[string]interface{}) {
+func (a *authService) setSessionCookie(w http.ResponseWriter, session authSession) {
 	payload := sessionPayload{
 		ExpiresAt: time.Now().Add(sessionTTL).Unix(),
-		UserInfo:  userInfo,
+		UserInfo:  session.UserInfo,
+		Groups:    session.Groups,
 	}
 	data, _ := json.Marshal(payload)
 	http.SetCookie(w, &http.Cookie{
@@ -306,12 +367,17 @@ func (a *authService) clearSessionCookie(w http.ResponseWriter) {
 }
 
 func userInfoFromContext(ctx context.Context) (map[string]interface{}, bool) {
-	userInfo, ok := ctx.Value(authContextKey{}).(map[string]interface{})
-	return userInfo, ok
+	session, ok := ctx.Value(authContextKey{}).(authSession)
+	return session.UserInfo, ok
 }
 
-func withUserInfo(ctx context.Context, userInfo map[string]interface{}) context.Context {
-	return context.WithValue(ctx, authContextKey{}, userInfo)
+func authSessionFromContext(ctx context.Context) (authSession, bool) {
+	session, ok := ctx.Value(authContextKey{}).(authSession)
+	return session, ok
+}
+
+func withAuthSession(ctx context.Context, session authSession) context.Context {
+	return context.WithValue(ctx, authContextKey{}, session)
 }
 
 func bearerTokenFromRequest(r *http.Request) string {

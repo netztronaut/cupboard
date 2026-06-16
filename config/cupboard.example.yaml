@@ -31,3 +31,5 @@ dashboard:
       url: "https://github.com"
       target: "_blank"
       icon: "fa-github"
+      groups:
+        - "code-internal"

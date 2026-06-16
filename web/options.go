@@ -24,6 +24,7 @@ type StaticLink struct {
 	URL       string
 	Target    string
 	Icon      string
+	Groups    []string
 }
 
 type PageOptions struct {

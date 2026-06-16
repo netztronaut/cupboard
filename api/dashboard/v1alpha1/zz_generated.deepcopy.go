@@ -140,6 +140,11 @@ func (in *BookmarkLink) DeepCopyInto(out *BookmarkLink) {
 		*out = new(URLSource)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Groups != nil {
+		in, out := &in.Groups, &out.Groups
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Properties != nil {
 		in, out := &in.Properties, &out.Properties
 		*out = make(map[string]string, len(*in))

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
+	forecastlev1alpha1 "github.com/netztronaut/cupboard/api/forecastle/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -260,6 +261,173 @@ func TestDashboardIncludesStaticLinks(t *testing.T) {
 	}
 	if len(payload.LinkGroups) != 1 || payload.LinkGroups[0].Name != "pinned" {
 		t.Fatalf("expected linkGroups metadata, got %+v", payload.LinkGroups)
+	}
+}
+
+func TestSessionCookieStoresUserGroups(t *testing.T) {
+	t.Helper()
+
+	auth := newAuthService(AuthOptions{Enabled: true, CookieSecret: "test-secret"})
+	rr := httptest.NewRecorder()
+	auth.setSessionCookie(rr, newAuthSession(map[string]interface{}{
+		"sub":    "user-1",
+		"groups": []interface{}{"devops", "admins", "devops", ""},
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	for _, cookie := range rr.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	session, err := auth.userInfoFromCookie(req)
+	if err != nil {
+		t.Fatalf("userInfoFromCookie() error = %v", err)
+	}
+	if got, want := session.Groups, []string{"devops", "admins"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("groups mismatch got=%v want=%v", got, want)
+	}
+}
+
+func TestDashboardFiltersRestrictedLinksBySessionGroups(t *testing.T) {
+	t.Helper()
+
+	s := runtime.NewScheme()
+	if err := scheme.AddToScheme(s); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("add dashboard scheme: %v", err)
+	}
+
+	bg := &dashboardv1alpha1.BookmarkGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "bookmarks", Namespace: "default"},
+		Spec: dashboardv1alpha1.BookmarkGroupSpec{
+			Name: "Pinned",
+			Links: []dashboardv1alpha1.BookmarkLink{
+				{Name: "Allowed CRD", URL: "https://crd.example.com", Groups: []string{"devops"}},
+				{Name: "Blocked CRD", URL: "https://blocked-crd.example.com", Groups: []string{"finance"}},
+			},
+		},
+	}
+	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).WithObjects(bg).Build(), stubDiscovery{}, Options{
+		Auth:       AuthOptions{Enabled: true, CookieSecret: "test-secret"},
+		LinkGroups: []LinkGroup{{Name: "Pinned", DisplayName: "Pinned"}},
+		StaticLinks: []StaticLink{
+			{Group: "Pinned", Name: "Allowed Static", URL: "https://static.example.com", Groups: []string{"devops"}},
+			{Group: "Pinned", Name: "Blocked Static", URL: "https://blocked-static.example.com", Groups: []string{"finance"}},
+			{Group: "Pinned", Name: "Public Static", URL: "https://public.example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	auth := newAuthService(AuthOptions{Enabled: true, CookieSecret: "test-secret"})
+	cookieRR := httptest.NewRecorder()
+	auth.setSessionCookie(cookieRR, newAuthSession(map[string]interface{}{
+		"sub":    "user-1",
+		"groups": []interface{}{"devops"},
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	for _, cookie := range cookieRR.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload DashboardResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Groups) != 1 {
+		t.Fatalf("expected one visible group, got %+v", payload.Groups)
+	}
+	got := map[string]struct{}{}
+	for _, link := range payload.Groups[0].Links {
+		got[link.Name] = struct{}{}
+	}
+	for _, name := range []string{"Allowed CRD", "Allowed Static", "Public Static"} {
+		if _, ok := got[name]; !ok {
+			t.Fatalf("expected visible link %q in %+v", name, payload.Groups[0].Links)
+		}
+	}
+	for _, name := range []string{"Blocked CRD", "Blocked Static"} {
+		if _, ok := got[name]; ok {
+			t.Fatalf("expected restricted link %q to be hidden in %+v", name, payload.Groups[0].Links)
+		}
+	}
+}
+
+func TestForecastleAppDisplayGroupMergesWithConfiguredLinkGroup(t *testing.T) {
+	t.Helper()
+
+	s := runtime.NewScheme()
+	if err := scheme.AddToScheme(s); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("add dashboard scheme: %v", err)
+	}
+	if err := forecastlev1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("add forecastle scheme: %v", err)
+	}
+
+	app := &forecastlev1alpha1.ForecastleApp{
+		ObjectMeta: metav1.ObjectMeta{Name: "quay-io", Namespace: "default"},
+		Spec: forecastlev1alpha1.ForecastleAppSpec{
+			Name:  "Quay.io",
+			Group: "Code & DevOps",
+			Icon:  "https://quay.io/static/img/quay_favicon.png",
+			URL:   "https://quay.io",
+		},
+	}
+	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).WithObjects(app).Build(), stubDiscovery{
+		forecastlev1alpha1.GroupVersion.String(): {
+			APIResources: []metav1.APIResource{{Kind: "ForecastleApp"}},
+		},
+	}, Options{
+		Auth:       AuthOptions{Enabled: false},
+		LinkGroups: []LinkGroup{{Name: "code-devops", DisplayName: "Code & DevOps"}},
+		StaticLinks: []StaticLink{
+			{LinkGroup: "code-devops", Name: "Docker Hub", URL: "https://hub.docker.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload DashboardResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Groups) != 1 {
+		t.Fatalf("expected one merged group, got %+v", payload.Groups)
+	}
+	group := payload.Groups[0]
+	if group.Name != "Code & DevOps" || group.LinkGroup != "code-devops" || len(group.Links) != 2 {
+		t.Fatalf("unexpected merged group: %+v", group)
+	}
+	found := false
+	for _, link := range group.Links {
+		if link.Name == "Quay.io" {
+			found = true
+			if link.Source != "forecastleapp" {
+				t.Fatalf("expected Quay.io source forecastleapp, got %q", link.Source)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected Quay.io link in merged group: %+v", group.Links)
 	}
 }
 

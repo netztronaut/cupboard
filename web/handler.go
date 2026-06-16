@@ -58,7 +58,7 @@ func (n *dashboardUpdateNotifier) start(ctx context.Context) {
 }
 
 func (n *dashboardUpdateNotifier) collectSignature(ctx context.Context) string {
-	payload, err := n.collector.collectDashboard(ctx)
+	payload, err := n.collector.collectDashboard(ctx, []string{allLinkGroupsWildcard})
 	if err != nil {
 		return ""
 	}
@@ -167,18 +167,19 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"userInfo": map[string]interface{}{"sub": "anonymous"},
+				"groups":   []string{},
 			})
 			return
 		}
 		switch r.Method {
 		case http.MethodGet:
-			userInfo, err := auth.userInfoFromCookie(r)
+			session, err := auth.userInfoFromCookie(r)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"userInfo": userInfo})
+			_ = json.NewEncoder(w).Encode(session)
 		case http.MethodPost:
 			token := bearerTokenFromRequest(r)
 			if token == "" {
@@ -190,9 +191,10 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 				http.Error(w, err.Error(), http.StatusUnauthorized)
 				return
 			}
-			auth.setSessionCookie(w, userInfo)
+			session := newAuthSession(userInfo)
+			auth.setSessionCookie(w, session)
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"userInfo": userInfo})
+			_ = json.NewEncoder(w).Encode(session)
 		case http.MethodDelete:
 			auth.clearSessionCookie(w)
 			w.WriteHeader(http.StatusNoContent)
@@ -205,7 +207,11 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
-		payload, collectErr := collector.collectDashboard(r.Context())
+		var userGroups []string
+		if session, ok := authSessionFromContext(r.Context()); ok {
+			userGroups = session.Groups
+		}
+		payload, collectErr := collector.collectDashboard(r.Context(), userGroups)
 		if collectErr != nil {
 			http.Error(w, collectErr.Error(), http.StatusInternalServerError)
 			return
@@ -271,13 +277,19 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 			return
 		}
 		if auth.enabled {
-			if _, err := auth.userInfoFromCookie(r); err != nil {
+			session, err := auth.userInfoFromCookie(r)
+			if err != nil {
 				frontendIndexHandler.ServeHTTP(w, r)
 				return
 			}
+			r = r.WithContext(withAuthSession(r.Context(), session))
 		}
 		var groups []DashboardGroup
-		if dashboard, collectErr := collector.collectDashboard(r.Context()); collectErr == nil {
+		var userGroups []string
+		if session, ok := authSessionFromContext(r.Context()); ok {
+			userGroups = session.Groups
+		}
+		if dashboard, collectErr := collector.collectDashboard(r.Context(), userGroups); collectErr == nil {
 			groups = dashboard.Groups
 		} else {
 			setupLog.Error(collectErr, "Could not collect dashboard for template render")
@@ -338,12 +350,12 @@ func injectAuthConfig(index []byte, config authConfigResponse) ([]byte, error) {
 
 func requireAuthentication(auth *authService, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userInfo, err := auth.authenticateRequest(r.Context(), r, w)
+		session, err := auth.authenticateRequest(r.Context(), r, w)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withUserInfo(r.Context(), userInfo)))
+		next.ServeHTTP(w, r.WithContext(withAuthSession(r.Context(), session)))
 	})
 }
 

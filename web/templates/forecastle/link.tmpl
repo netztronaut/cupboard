@@ -18,6 +18,13 @@
     <p class="fc-card-url">{{urlHost .URL}}</p>
   </a>
   <div class="fc-card-actions">
+    {{if eq .Source "forecastleapp"}}
+      <span class="fc-source"><i class="fa-solid fa-cubes" aria-hidden="true"></i> Forecastle</span>
+    {{else if eq .Source "bookmarkgroup"}}
+      <span class="fc-source"><i class="fa-solid fa-cube" aria-hidden="true"></i> CRD</span>
+    {{else}}
+      <span class="fc-source"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Config</span>
+    {{end}}
     <a class="fc-open" href="{{.URL}}" target="_blank" rel="noreferrer" aria-label="Open in new tab">
       <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
     </a>

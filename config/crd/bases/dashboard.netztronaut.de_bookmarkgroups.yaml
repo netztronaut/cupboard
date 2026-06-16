@@ -45,6 +45,13 @@ spec:
                   description: BookmarkLink describes a link entry rendered in the
                     dashboard.
                   properties:
+                    groups:
+                      description: |-
+                        Groups restricts this link to users who belong to at least one listed group.
+                        When omitted, the link is visible to every user.
+                      items:
+                        type: string
+                      type: array
                     icon:
                       description: |-
                         Icon identifies an icon for this link.

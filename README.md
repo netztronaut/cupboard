@@ -65,7 +65,7 @@ Runtime configuration can also be loaded from a file via:
 The dashboard data model is grouped bookmarks:
 
 - Groups with names (`BookmarkGroup.spec.name`, fallback `metadata.name`)
-- Links with `name`, `url` or `urlFrom`, `target`, and `icon`
+- Links with `name`, `url` or `urlFrom`, `target`, `icon`, and optional `groups`
 - Optional static links from config file (`dashboard.staticLinks`)
 - Optional link group metadata from config (`dashboard.linkGroups`): `priority`, `priorityClass` (`first`/`last`), `displayName`
 
@@ -102,7 +102,7 @@ Set these environment variables for backend/frontend authentication:
 - `OIDC_USERINFO_ENDPOINT` (optional; if omitted, discovered from issuer metadata)
 - `CUPBOARD_COOKIE_SECRET` (recommended for production)
 
-The frontend performs the PKCE authorization-code flow and authenticates to backend endpoints using bearer tokens. The backend fetches userinfo and persists it in an HTTP-only signed cookie.
+The frontend performs the PKCE authorization-code flow and authenticates to backend endpoints using bearer tokens. The backend fetches userinfo and persists it in an HTTP-only signed cookie. If userinfo contains a `groups` claim, the backend stores those groups in the session and uses them to filter links that declare `groups`.
 
 ### Configuration file
 
@@ -132,6 +132,8 @@ dashboard:
       url: "https://duckduckgo.com"
       target: "_blank"
       icon: "lucide:search"
+      groups:
+        - "code-internal"
 ```
 
 `/api/dashboard` returns `groups` plus `linkGroups` metadata with deterministic ordering based on `priorityClass`, `priority`, and name.

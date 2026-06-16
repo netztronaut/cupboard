@@ -455,6 +455,11 @@
           const fallback = String(name || "?").trim().charAt(0) || "?";
           return esc(fallback.toUpperCase());
         };
+        const sourceBadgeHTML = (source) => {
+          if (source === "forecastleapp") return `<span class="fc-source"><i class="fa-solid fa-cubes" aria-hidden="true"></i> Forecastle</span>`;
+          if (source === "bookmarkgroup") return `<span class="fc-source"><i class="fa-solid fa-cube" aria-hidden="true"></i> CRD</span>`;
+          return `<span class="fc-source"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Config</span>`;
+        };
         const linkCardHTML = (link) => {
           const target = link.target || "_self";
           const name = link.name || "";
@@ -467,7 +472,7 @@
                 <p class="fc-card-url">${esc(urlHost(url))}</p>
               </a>
               <div class="fc-card-actions">
-                <span class="fc-source"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Config</span>
+                ${sourceBadgeHTML(link.source)}
                 <a class="fc-open" href="${esc(url)}" target="_blank" rel="noreferrer" aria-label="Open in new tab">
                   <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
                 </a>
