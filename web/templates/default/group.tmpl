@@ -1,0 +1,10 @@
+{{define "group"}}
+<section class="group">
+  <h2>{{.Name}}</h2>
+  <ul>
+    {{range .Links}}
+      {{template "link" .}}
+    {{end}}
+  </ul>
+</section>
+{{end}}

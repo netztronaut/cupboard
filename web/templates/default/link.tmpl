@@ -1,0 +1,16 @@
+{{define "link"}}
+<li>
+  <a href="{{.URL}}" target="{{if .Target}}{{.Target}}{{else}}_self{{end}}" rel="noreferrer">
+    {{if .Icon}}
+      {{if isFontAwesomeKey .Icon}}
+        <i class="icon fa-brands {{.Icon}}" aria-hidden="true"></i>
+      {{else if iconAssetURL .Icon}}
+        <img class="icon icon-image" src="{{iconAssetURL .Icon}}" alt="" />
+      {{else}}
+        <span class="icon">{{.Icon}}</span>
+      {{end}}
+    {{end}}
+    {{.Name}}
+  </a>
+</li>
+{{end}}

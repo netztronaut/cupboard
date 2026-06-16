@@ -1,0 +1,132 @@
+{{define "page"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    {{if .FaviconURL}}<link rel="icon" href="{{.FaviconURL}}" />{{end}}
+    <link rel="stylesheet" href="/static/fontawesome/css/fontawesome.min.css" />
+    <link rel="stylesheet" href="/static/fontawesome/css/brands.min.css" />
+    <link rel="stylesheet" href="/static/fontawesome/css/solid.min.css" />
+    <style>
+      :root { color-scheme: light dark; }
+      body { margin: 0; font-family: system-ui, sans-serif; }
+      .container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+      .content--grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .content--list { display: block; }
+      .group { border: 1px solid #8884; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
+      .group h2 { margin: 0 0 .75rem 0; font-size: 1.1rem; }
+      ul { margin: 0; padding-left: 1.2rem; }
+      li { margin: .25rem 0; }
+      .icon { margin-right: .35rem; opacity: .8; width: 1.1rem; text-align: center; display: inline-block; }
+      .icon-image { width: 1.1rem; height: 1.1rem; vertical-align: middle; }
+      header, footer { border-bottom: 1px solid #8884; }
+      footer { border-top: 1px solid #8884; border-bottom: none; margin-top: 1rem; }
+      small { opacity: .75; }
+    </style>
+    <script>
+      window.addEventListener("DOMContentLoaded", function () {
+        const groupsNode = document.getElementById("dashboard-groups");
+        const statusNode = document.getElementById("dashboard-status");
+        if (!groupsNode || !statusNode) return;
+        const minRefreshIntervalMs = 2000;
+        let lastRefreshAt = 0;
+        let scheduledRefresh = null;
+        let ws = null;
+
+        const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => (
+          { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+        ));
+        const iconAssetURL = (icon) => {
+          const value = String(icon || "").trim();
+          if (value.startsWith("http://") || value.startsWith("https://")) return value;
+          const split = value.split(":");
+          if (split.length !== 2) return "";
+          const [prefix, name] = split;
+          if (!/^[a-z0-9-]+$/.test(name)) return "";
+          if (prefix === "lucide") return "/static/icons/lucide/" + name + ".svg";
+          if (prefix === "tabler") return "/static/icons/tabler/" + name + ".svg";
+          if (prefix === "hero") return "/static/icons/heroicons/24/outline/" + name + ".svg";
+          return "";
+        };
+        const iconHTML = (icon) => {
+          if (!icon) return "";
+          const value = String(icon).trim();
+          if (value.startsWith("fa-")) return `<i class="icon fa-brands ${esc(value)}" aria-hidden="true"></i>`;
+          const asset = iconAssetURL(value);
+          if (asset) return `<img class="icon icon-image" src="${esc(asset)}" alt="" />`;
+          return `<span class="icon">${esc(value)}</span>`;
+        };
+
+        const renderDashboard = async () => {
+          const response = await fetch("/api/dashboard", { credentials: "include" });
+          if (!response.ok) throw new Error("dashboard request failed");
+          const payload = await response.json();
+          const groups = Array.isArray(payload.groups) ? payload.groups : [];
+          if (!groups.length) {
+            statusNode.textContent = "No links available.";
+            lastRefreshAt = Date.now();
+            return;
+          }
+          statusNode.textContent = "";
+          groupsNode.innerHTML = groups.map((group) => `
+            <section class="group">
+              <h2>${esc(group.name || "")}</h2>
+              <ul>
+                ${(Array.isArray(group.links) ? group.links : []).map((link) => `
+                  <li>
+                    <a href="${esc(link.url || "#")}" target="${esc(link.target || "_self")}" rel="noreferrer">
+                      ${iconHTML(link.icon)}
+                      ${esc(link.name || "")}
+                    </a>
+                  </li>
+                `).join("")}
+              </ul>
+            </section>
+          `).join("");
+          lastRefreshAt = Date.now();
+        };
+        const scheduleRefresh = () => {
+          const now = Date.now();
+          const delay = Math.max(0, minRefreshIntervalMs - (now - lastRefreshAt));
+          if (scheduledRefresh) {
+            return;
+          }
+          scheduledRefresh = setTimeout(async function () {
+            scheduledRefresh = null;
+            try {
+              await renderDashboard();
+            } catch (_) {
+              statusNode.textContent = "Failed to load links.";
+            }
+          }, delay);
+        };
+        const connectUpdates = () => {
+          const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+          ws = new WebSocket(`${protocol}//${window.location.host}/api/dashboard/updates`);
+          ws.addEventListener("message", function () {
+            scheduleRefresh();
+          });
+          ws.addEventListener("close", function () {
+            setTimeout(connectUpdates, 2000);
+          });
+          ws.addEventListener("error", function () {
+            ws.close();
+          });
+        };
+
+        renderDashboard().catch(function () {
+          statusNode.textContent = "Failed to load links.";
+        });
+        connectUpdates();
+      });
+    </script>
+  </head>
+  <body>
+    {{template "header" .}}
+    {{template "content" .}}
+    {{template "footer" .}}
+  </body>
+</html>
+{{end}}

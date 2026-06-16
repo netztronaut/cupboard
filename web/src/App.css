@@ -1,0 +1,91 @@
+.app {
+  max-width: 720px;
+  margin: 3rem auto;
+  padding: 0 1rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2.5rem;
+}
+
+.subtitle {
+  margin-top: 0.5rem;
+  color: #475569;
+}
+
+.actions {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.actions button {
+  border: 1px solid #94a3b8;
+  background: #fff;
+  border-radiuxs: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  cursor: pointer;
+}
+
+.panel {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  background-color: #f8fafc;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.panel ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+.group {
+  margin-top: 1rem;
+}
+
+.group h3 {
+  margin-bottom: 0.25rem;
+}
+
+.group ul {
+  list-style: none;
+  padding: 0;
+}
+
+.group li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.35rem 0;
+}
+
+.group a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  color: #1d4ed8;
+}
+
+.group img {
+  width: 1rem;
+  height: 1rem;
+  object-fit: contain;
+}
+
+.group small {
+  color: #64748b;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}

@@ -1,0 +1,26 @@
+{{define "link"}}
+<article class="fc-card" data-search="{{lower .Name}} {{lower .URL}}">
+  <a class="fc-card-main" href="{{.URL}}" target="{{if .Target}}{{.Target}}{{else}}_self{{end}}" rel="noreferrer">
+    <span class="fc-card-icon">
+      {{if .Icon}}
+        {{if isFontAwesomeKey .Icon}}
+          <i class="fa-brands {{.Icon}}" aria-hidden="true"></i>
+        {{else if iconAssetURL .Icon}}
+          <img class="fc-card-icon-image" src="{{iconAssetURL .Icon}}" alt="" />
+        {{else}}
+          {{initial .Name}}
+        {{end}}
+      {{else}}
+        <i class="fa-solid fa-link" aria-hidden="true"></i>
+      {{end}}
+    </span>
+    <h3 class="fc-card-title">{{.Name}}</h3>
+    <p class="fc-card-url">{{urlHost .URL}}</p>
+  </a>
+  <div class="fc-card-actions">
+    <a class="fc-open" href="{{.URL}}" target="_blank" rel="noreferrer" aria-label="Open in new tab">
+      <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+    </a>
+  </div>
+</article>
+{{end}}
