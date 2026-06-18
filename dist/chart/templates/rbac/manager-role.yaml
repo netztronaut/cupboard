@@ -22,6 +22,7 @@ rules:
   - dashboard.netztronaut.de
   resources:
   - bookmarkgroups
+  - bookmarks
   verbs:
   - get
   - list
