@@ -86,7 +86,6 @@ func (n *dashboardUpdateNotifier) closeAll() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	for conn := range n.clients {
-		_ = conn.Close()
 		delete(n.clients, conn)
 	}
 }

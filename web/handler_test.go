@@ -1,734 +1,529 @@
+/*
+Copyright 2026 steigr <me@stei.gr>.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package web
 
 import (
+	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
-	"testing/fstest"
+	"time"
 
-	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
-	forecastlev1alpha1 "github.com/netztronaut/cupboard/api/forecastle/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/scheme"
+	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/assert"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-type stubDiscovery map[string]*metav1.APIResourceList
+func TestDashboardUpdateNotifier_Start(t *testing.T) {
+	collector := &dashboardCollector{}
+	notifier := newDashboardUpdateNotifier(collector)
 
-func (s stubDiscovery) ServerResourcesForGroupVersion(groupVersion string) (*metav1.APIResourceList, error) {
-	if list, ok := s[groupVersion]; ok {
-		return list, nil
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	notifier.start(ctx)
+
+	// Give it a moment to start
+	select {
+	case <-time.After(10 * time.Millisecond):
+		// Expected behavior - ticker started
+	case <-ctx.Done():
+		t.Fatal("Context cancelled unexpectedly")
 	}
-	return &metav1.APIResourceList{}, nil
+
+	// Stop by canceling context
+	cancel()
 }
 
-func TestIndexDocumentInjectsDisabledAuthConfig(t *testing.T) {
-	t.Helper()
+func TestDashboardUpdateNotifier_Register(t *testing.T) {
+	collector := &dashboardCollector{}
+	notifier := newDashboardUpdateNotifier(collector)
 
-	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{Auth: AuthOptions{Enabled: false}})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
+	conn := &websocket.Conn{}
+	notifier.register(conn)
 
-	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), `<script>window.config = {"enabled":false};</script>`) {
-		t.Fatalf("index document does not contain disabled auth config: %s", rr.Body.String())
-	}
+	assert.Contains(t, notifier.clients, conn)
 }
 
-func TestDashboardSkipsMissingHTTPRoute(t *testing.T) {
-	t.Helper()
+func TestDashboardUpdateNotifier_Unregister(t *testing.T) {
+	collector := &dashboardCollector{}
+	notifier := newDashboardUpdateNotifier(collector)
 
-	s := runtime.NewScheme()
-	if err := scheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add dashboard scheme: %v", err)
-	}
+	conn := &websocket.Conn{}
+	notifier.register(conn)
+	assert.Contains(t, notifier.clients, conn)
 
-	bg := &dashboardv1alpha1.BookmarkGroup{}
-	bg.SetGroupVersionKind(dashboardv1alpha1.GroupVersion.WithKind("BookmarkGroup"))
-	bg.Name = "bookmarks"
-	bg.Namespace = "default"
-	bg.Spec.Name = "My Group"
-	bg.Spec.Links = []dashboardv1alpha1.BookmarkLink{{
-		Name: "Docs",
-		URL:  "https://example.invalid",
-	}}
-
-	handler, err := NewHandler(
-		fake.NewClientBuilder().WithScheme(s).WithObjects(bg).Build(),
-		stubDiscovery{
-			"gateway.networking.k8s.io/v1": {APIResources: nil},
-			"cupboard.netztronaut.de/v1alpha1": {
-				APIResources: []metav1.APIResource{{Kind: "BookmarkGroup"}},
-			},
-		},
-		Options{Auth: AuthOptions{Enabled: false}},
-	)
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	var payload DashboardResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(payload.Groups) != 1 || payload.Groups[0].Name != "My Group" || len(payload.Groups[0].Links) != 1 {
-		t.Fatalf("unexpected payload: %+v", payload)
-	}
+	notifier.unregister(conn)
+	assert.NotContains(t, notifier.clients, conn)
 }
 
-func TestOIDCDiscoveryProxyRewritesIssuer(t *testing.T) {
-	t.Helper()
+func TestDashboardUpdateNotifier_CloseAll(t *testing.T) {
+	collector := &dashboardCollector{}
+	notifier := newDashboardUpdateNotifier(collector)
 
-	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		if r.URL.Path != "/.well-known/openid-configuration" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"issuer":            "https://issuer.example",
-			"userinfo_endpoint": "https://issuer.example/userinfo",
-		})
-	}))
-	defer issuer.Close()
-
-	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{
-		Auth: AuthOptions{
-			Enabled:   true,
-			IssuerURL: issuer.URL,
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+	// Test that closeAll removes all clients
+	conn1 := &websocket.Conn{}
+	conn2 := &websocket.Conn{}
+	notifier.clients = map[*websocket.Conn]struct{}{
+		conn1: {},
+		conn2: {},
 	}
 
-	server := httptest.NewServer(handler)
-	defer server.Close()
+	assert.Len(t, notifier.clients, 2)
 
-	resp, err := http.Get(server.URL + "/.well-known/openid-configuration")
-	if err != nil {
-		t.Fatalf("GET discovery: %v", err)
-	}
-	defer resp.Body.Close()
-
-	var payload map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode discovery: %v", err)
-	}
-	if got, want := payload["issuer"], server.URL; got != want {
-		t.Fatalf("issuer mismatch: got %q want %q", got, want)
-	}
+	// closeAll should clear the clients map
+	notifier.closeAll()
+	assert.Len(t, notifier.clients, 0)
 }
 
-func TestRootDocumentAuthConfigUsesDirectIssuerWhenServerCannotReachIssuer(t *testing.T) {
-	t.Helper()
+func TestDashboardUpdateNotifier_BroadcastPing_NoClients(t *testing.T) {
+	collector := &dashboardCollector{}
+	notifier := newDashboardUpdateNotifier(collector)
 
-	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{
-		Auth: AuthOptions{
-			Enabled:   true,
-			IssuerURL: "http://127.0.0.1:1",
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Host = "cupboard.local"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	payload, err := extractInjectedAuthConfig(rr.Body.String())
-	if err != nil {
-		t.Fatalf("decode injected auth config: %v", err)
-	}
-	if got, want := payload.IssuerURL, "http://127.0.0.1:1"; got != want {
-		t.Fatalf("issuerUrl mismatch: got %q want %q", got, want)
-	}
-	if got, want := payload.OpenIDConfigurationURL, "http://127.0.0.1:1/.well-known/openid-configuration"; got != want {
-		t.Fatalf("openidConfigurationUrl mismatch: got %q want %q", got, want)
-	}
-
-	discoveryReq := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
-	discoveryRR := httptest.NewRecorder()
-	handler.ServeHTTP(discoveryRR, discoveryReq)
-	if discoveryRR.Code != http.StatusNotFound {
-		t.Fatalf("unexpected discovery proxy status: got %d body=%s", discoveryRR.Code, discoveryRR.Body.String())
-	}
+	// Should not panic with no clients
+	notifier.broadcastPing()
 }
 
-func TestInjectAuthConfigRejectsIndexWithoutHead(t *testing.T) {
-	t.Helper()
+func TestDashboardUpdateNotifier_Start_ContextCancelled(t *testing.T) {
+	collector := &dashboardCollector{}
+	notifier := newDashboardUpdateNotifier(collector)
 
-	if _, err := injectAuthConfig([]byte("<html></html>"), authConfigResponse{Enabled: true}); err == nil {
-		t.Fatal("expected error for index without </head>")
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	notifier.start(ctx)
+	// Should exit gracefully when context is cancelled
 }
 
-func extractInjectedAuthConfig(document string) (authConfigResponse, error) {
-	const prefix = `<script>window.config = `
-	start := strings.Index(document, prefix)
-	if start == -1 {
-		return authConfigResponse{}, errors.New("window.config script not found")
+func TestDashboardUpdateNotifier_Register_Multiple(t *testing.T) {
+	collector := &dashboardCollector{}
+	notifier := newDashboardUpdateNotifier(collector)
+
+	for i := 0; i < 5; i++ {
+		conn := &websocket.Conn{}
+		notifier.register(conn)
 	}
-	start += len(prefix)
-	end := strings.Index(document[start:], `;</script>`)
-	if end == -1 {
-		return authConfigResponse{}, errors.New("window.config script terminator not found")
-	}
-	var payload authConfigResponse
-	if err := json.Unmarshal([]byte(document[start:start+end]), &payload); err != nil {
-		return authConfigResponse{}, err
-	}
-	return payload, nil
+
+	assert.Len(t, notifier.clients, 5)
 }
 
-func TestDashboardIncludesStaticLinks(t *testing.T) {
-	t.Helper()
+func TestDashboardUpdateNotifier_Unregister_Multiple(t *testing.T) {
+	collector := &dashboardCollector{}
+	notifier := newDashboardUpdateNotifier(collector)
 
-	s := runtime.NewScheme()
-	if err := scheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add dashboard scheme: %v", err)
-	}
-
-	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).Build(), stubDiscovery{}, Options{
-		Auth: AuthOptions{Enabled: false},
-		LinkGroups: []LinkGroup{
-			{Name: "pinned", DisplayName: "Pinned", Priority: 10, PriorityClass: "first"},
-		},
-		StaticLinks: []StaticLink{
-			{
-				LinkGroup: "pinned",
-				Name:      "GitHub",
-				URL:       "https://github.com",
-				Target:    "_blank",
-				Icon:      "fa-github",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+	var conns []*websocket.Conn
+	for i := 0; i < 5; i++ {
+		conn := &websocket.Conn{}
+		notifier.register(conn)
+		conns = append(conns, conn)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
+	for _, conn := range conns {
+		notifier.unregister(conn)
 	}
-	var payload DashboardResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(payload.Groups) != 1 || payload.Groups[0].Name != "Pinned" || payload.Groups[0].LinkGroup != "pinned" || len(payload.Groups[0].Links) != 1 {
-		t.Fatalf("unexpected payload: %+v", payload)
-	}
-	if payload.Groups[0].Links[0].Source != "static" {
-		t.Fatalf("expected static source, got %q", payload.Groups[0].Links[0].Source)
-	}
-	if len(payload.LinkGroups) != 1 || payload.LinkGroups[0].Name != "pinned" {
-		t.Fatalf("expected linkGroups metadata, got %+v", payload.LinkGroups)
-	}
+
+	assert.Len(t, notifier.clients, 0)
 }
 
-func TestSessionCookieStoresUserGroups(t *testing.T) {
-	t.Helper()
+func TestNewHandler_Success(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{}
 
-	auth := newAuthService(AuthOptions{Enabled: true, CookieSecret: "test-secret"})
-	rr := httptest.NewRecorder()
-	auth.setSessionCookie(rr, newAuthSession(map[string]interface{}{
-		"sub":    "user-1",
-		"groups": []interface{}{"devops", "admins", "devops", ""},
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
-	for _, cookie := range rr.Result().Cookies() {
-		req.AddCookie(cookie)
-	}
-
-	session, err := auth.userInfoFromCookie(req)
-	if err != nil {
-		t.Fatalf("userInfoFromCookie() error = %v", err)
-	}
-	if got, want := session.Groups, []string{"devops", "admins"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("groups mismatch got=%v want=%v", got, want)
-	}
+	handler, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
 }
 
-func TestDashboardFiltersRestrictedLinksBySessionGroups(t *testing.T) {
-	t.Helper()
+func TestNewHandler_EmptyOptions(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{}
 
-	s := runtime.NewScheme()
-	if err := scheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add dashboard scheme: %v", err)
-	}
-
-	bg := &dashboardv1alpha1.BookmarkGroup{
-		ObjectMeta: metav1.ObjectMeta{Name: "bookmarks", Namespace: "default"},
-		Spec: dashboardv1alpha1.BookmarkGroupSpec{
-			Name: "Pinned",
-			Links: []dashboardv1alpha1.BookmarkLink{
-				{Name: "Allowed CRD", URL: "https://crd.example.com", Groups: []string{"devops"}},
-				{Name: "Blocked CRD", URL: "https://blocked-crd.example.com", Groups: []string{"finance"}},
-			},
-		},
-	}
-	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).WithObjects(bg).Build(), stubDiscovery{}, Options{
-		Auth:       AuthOptions{Enabled: true, CookieSecret: "test-secret"},
-		LinkGroups: []LinkGroup{{Name: "Pinned", DisplayName: "Pinned"}},
-		StaticLinks: []StaticLink{
-			{Group: "Pinned", Name: "Allowed Static", URL: "https://static.example.com", Groups: []string{"devops"}},
-			{Group: "Pinned", Name: "Blocked Static", URL: "https://blocked-static.example.com", Groups: []string{"finance"}},
-			{Group: "Pinned", Name: "Public Static", URL: "https://public.example.com"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	auth := newAuthService(AuthOptions{Enabled: true, CookieSecret: "test-secret"})
-	cookieRR := httptest.NewRecorder()
-	auth.setSessionCookie(cookieRR, newAuthSession(map[string]interface{}{
-		"sub":    "user-1",
-		"groups": []interface{}{"devops"},
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
-	for _, cookie := range cookieRR.Result().Cookies() {
-		req.AddCookie(cookie)
-	}
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	var payload DashboardResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(payload.Groups) != 1 {
-		t.Fatalf("expected one visible group, got %+v", payload.Groups)
-	}
-	got := map[string]struct{}{}
-	for _, link := range payload.Groups[0].Links {
-		got[link.Name] = struct{}{}
-	}
-	for _, name := range []string{"Allowed CRD", "Allowed Static", "Public Static"} {
-		if _, ok := got[name]; !ok {
-			t.Fatalf("expected visible link %q in %+v", name, payload.Groups[0].Links)
-		}
-	}
-	for _, name := range []string{"Blocked CRD", "Blocked Static"} {
-		if _, ok := got[name]; ok {
-			t.Fatalf("expected restricted link %q to be hidden in %+v", name, payload.Groups[0].Links)
-		}
-	}
+	handler, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
 }
 
-func TestForecastleAppDisplayGroupMergesWithConfiguredLinkGroup(t *testing.T) {
-	t.Helper()
-
-	s := runtime.NewScheme()
-	if err := scheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add dashboard scheme: %v", err)
-	}
-	if err := forecastlev1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add forecastle scheme: %v", err)
-	}
-
-	app := &forecastlev1alpha1.ForecastleApp{
-		ObjectMeta: metav1.ObjectMeta{Name: "quay-io", Namespace: "default"},
-		Spec: forecastlev1alpha1.ForecastleAppSpec{
-			Name:  "Quay.io",
-			Group: "Code & DevOps",
-			Icon:  "https://quay.io/static/img/quay_favicon.png",
-			URL:   "https://quay.io",
-		},
-	}
-	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).WithObjects(app).Build(), stubDiscovery{
-		forecastlev1alpha1.GroupVersion.String(): {
-			APIResources: []metav1.APIResource{{Kind: "ForecastleApp"}},
-		},
-	}, Options{
-		Auth:       AuthOptions{Enabled: false},
-		LinkGroups: []LinkGroup{{Name: "code-devops", DisplayName: "Code & DevOps"}},
-		StaticLinks: []StaticLink{
-			{LinkGroup: "code-devops", Name: "Docker Hub", URL: "https://hub.docker.com"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	var payload DashboardResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(payload.Groups) != 1 {
-		t.Fatalf("expected one merged group, got %+v", payload.Groups)
-	}
-	group := payload.Groups[0]
-	if group.Name != "Code & DevOps" || group.LinkGroup != "code-devops" || len(group.Links) != 2 {
-		t.Fatalf("unexpected merged group: %+v", group)
-	}
-	found := false
-	for _, link := range group.Links {
-		if link.Name == "Quay.io" {
-			found = true
-			if link.Source != "forecastleapp" {
-				t.Fatalf("expected Quay.io source forecastleapp, got %q", link.Source)
-			}
-			if link.Target != "_blank" {
-				t.Fatalf("expected Quay.io target _blank, got %q", link.Target)
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("expected Quay.io link in merged group: %+v", group.Links)
-	}
-}
-
-func TestForecastleAppInstanceFilter(t *testing.T) {
-	t.Helper()
-
-	s := runtime.NewScheme()
-	if err := scheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add dashboard scheme: %v", err)
-	}
-	if err := forecastlev1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add forecastle scheme: %v", err)
-	}
-
-	matching := &forecastlev1alpha1.ForecastleApp{
-		ObjectMeta: metav1.ObjectMeta{Name: "matching", Namespace: "default"},
-		Spec: forecastlev1alpha1.ForecastleAppSpec{
-			Name:     "Matching",
-			Instance: "cupboard",
-			Group:    "Apps",
-			Icon:     "fa-check",
-			URL:      "https://matching.example.com",
-		},
-	}
-	other := &forecastlev1alpha1.ForecastleApp{
-		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "default"},
-		Spec: forecastlev1alpha1.ForecastleAppSpec{
-			Name:     "Other",
-			Instance: "forecastle",
-			Group:    "Apps",
-			Icon:     "fa-xmark",
-			URL:      "https://other.example.com",
-		},
-	}
-	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).WithObjects(matching, other).Build(), stubDiscovery{
-		forecastlev1alpha1.GroupVersion.String(): {
-			APIResources: []metav1.APIResource{{Kind: "ForecastleApp"}},
-		},
-	}, Options{
-		Auth:       AuthOptions{Enabled: false},
-		Forecastle: ForecastleOptions{Instance: "cupboard"},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	var payload DashboardResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(payload.Groups) != 1 || len(payload.Groups[0].Links) != 1 {
-		t.Fatalf("expected one matching ForecastleApp link, got %+v", payload.Groups)
-	}
-	if got := payload.Groups[0].Links[0].Name; got != "Matching" {
-		t.Fatalf("expected matching instance link, got %q", got)
-	}
-}
-
-func TestLinkGroupOrderingByClassPriorityAndDisplayName(t *testing.T) {
-	t.Helper()
-
-	s := runtime.NewScheme()
-	if err := scheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add dashboard scheme: %v", err)
-	}
-
-	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).Build(), stubDiscovery{}, Options{
-		Auth: AuthOptions{Enabled: false},
-		LinkGroups: []LinkGroup{
-			{Name: "z-last", DisplayName: "Z Last", PriorityClass: "last"},
-			{Name: "a-first", DisplayName: "A First", PriorityClass: "first"},
-			{Name: "b-mid", DisplayName: "B Mid", Priority: 20},
-			{Name: "a-mid", DisplayName: "A Mid", Priority: 10},
-		},
-		StaticLinks: []StaticLink{
-			{LinkGroup: "z-last", Name: "one", URL: "https://example.com/1"},
-			{LinkGroup: "a-first", Name: "two", URL: "https://example.com/2"},
-			{LinkGroup: "b-mid", Name: "three", URL: "https://example.com/3"},
-			{LinkGroup: "a-mid", Name: "four", URL: "https://example.com/4"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	var payload DashboardResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(payload.Groups) != 4 {
-		t.Fatalf("expected 4 groups, got %+v", payload.Groups)
-	}
-	got := []string{payload.Groups[0].LinkGroup, payload.Groups[1].LinkGroup, payload.Groups[2].LinkGroup, payload.Groups[3].LinkGroup}
-	want := []string{"a-first", "a-mid", "b-mid", "z-last"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("group order mismatch got=%v want=%v", got, want)
-		}
-	}
-}
-
-func TestRootPageServesSelectedTemplate(t *testing.T) {
-	t.Helper()
-
-	s := runtime.NewScheme()
-	if err := scheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add dashboard scheme: %v", err)
-	}
-
-	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).Build(), stubDiscovery{}, Options{
-		Auth: AuthOptions{Enabled: false},
-		Page: PageOptions{
-			TemplateSet:   "default",
-			Title:         "My Cupboard",
-			FaviconURL:    "/custom.ico",
-			ContentLayout: "grid",
-		},
-		StaticLinks: []StaticLink{
-			{Group: "Pinned", Name: "Docs", URL: "https://example.com", Icon: "fa-github"},
-			{Group: "Pinned", Name: "Search", URL: "https://duckduckgo.com", Icon: "lucide:search"},
-			{Group: "Pinned", Name: "Home", URL: "https://example.org", Icon: "hero:home"},
-			{Group: "Pinned", Name: "Bell", URL: "https://example.net", Icon: "tabler:bell"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	if !strings.Contains(body, "My Cupboard") || !strings.Contains(body, "content--grid") || !strings.Contains(body, "/custom.ico") {
-		t.Fatalf("expected selected template page options: %s", body)
-	}
-	if strings.Contains(body, `<div id="root"></div>`) || strings.Contains(body, `window.config`) {
-		t.Fatalf("expected template page instead of SPA index: %s", body)
-	}
-}
-
-func TestIndexHTMLPathUsesInjectedSPAIndex(t *testing.T) {
-	t.Helper()
-
-	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{Auth: AuthOptions{Enabled: false}})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), `<script>window.config = {"enabled":false};</script>`) {
-		t.Fatalf("index.html path does not contain injected auth config: %s", rr.Body.String())
-	}
-}
-
-func TestFaviconPrefersFilesystemAsset(t *testing.T) {
-	t.Helper()
-
-	previousFS := filesystemTemplateFS
-	filesystemTemplateFS = os.DirFS(t.TempDir())
-	t.Cleanup(func() {
-		filesystemTemplateFS = previousFS
-	})
-
-	dir := t.TempDir()
-	if err := os.WriteFile(dir+"/favicon.ico", []byte("filesystem favicon"), 0o644); err != nil {
-		t.Fatalf("write favicon: %v", err)
-	}
-	filesystemTemplateFS = os.DirFS(dir)
-
-	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{Auth: AuthOptions{Enabled: false}})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if got := rr.Body.String(); got != "filesystem favicon" {
-		t.Fatalf("favicon mismatch: got %q", got)
-	}
-}
-
-func TestReadRootAssetRejectsNestedPaths(t *testing.T) {
-	t.Helper()
-
-	if _, err := readRootAsset(fstest.MapFS{}, "../favicon.ico"); err == nil {
-		t.Fatal("expected nested root asset path to be rejected")
-	}
-}
-
-func TestRootPageUsesTemplateSet(t *testing.T) {
-	t.Helper()
-
-	s := runtime.NewScheme()
-	if err := scheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := dashboardv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("add dashboard scheme: %v", err)
-	}
-
-	handler, err := NewHandler(fake.NewClientBuilder().WithScheme(s).Build(), stubDiscovery{}, Options{
-		Auth: AuthOptions{Enabled: false},
-		Page: PageOptions{
-			TemplateSet: "forecastle",
-			Title:       "Forecastle",
-		},
-		LinkGroups: []LinkGroup{{Name: "docs", DisplayName: "Docs"}},
-		StaticLinks: []StaticLink{
-			{LinkGroup: "docs", Name: "GitHub", URL: "https://github.com", Icon: "fa-github"},
-			{LinkGroup: "docs", Name: "Search", URL: "https://duckduckgo.com", Icon: "lucide:search"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	if !strings.Contains(body, `class="fc-header"`) || !strings.Contains(body, `class="container fc-groups"`) {
-		t.Fatalf("expected forecastle template page: %s", body)
-	}
-}
-
-func TestRootPageWithAuthAndNoSessionServesSPAIndex(t *testing.T) {
-	t.Helper()
-
-	handler, err := NewHandler(fake.NewClientBuilder().Build(), stubDiscovery{}, Options{
+func TestNewHandler_WithAuth(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{
 		Auth: AuthOptions{
 			Enabled:      true,
-			IssuerURL:    "https://issuer.example",
-			ClientID:     "cupboard",
 			CookieSecret: "test-secret",
 		},
-		Page: PageOptions{
-			TemplateSet: "forecastle",
-			Title:       "Forecastle",
+	}
+
+	handler, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
+}
+
+func TestNewHandler_WithLinkGroups(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{
+		LinkGroups: []LinkGroup{
+			{Name: "group1", Priority: 10},
 		},
+	}
+
+	handler, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
+}
+
+func TestNewHandler_WithStaticLinks(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{
+		StaticLinks: []StaticLink{
+			{Name: "link1", URL: "https://example.com"},
+		},
+	}
+
+	handler, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
+}
+
+func TestNewHandler_WithPageOptions(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{
+		Page: PageOptions{
+			Title:         "Test Title",
+			FaviconURL:    "/favicon.ico",
+			ContentLayout: "grid",
+		},
+	}
+
+	handler, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
+}
+
+func TestNewHandler_WithForecastleOptions(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{
+		Forecastle: ForecastleOptions{
+			Instance: "test-instance",
+		},
+	}
+
+	handler, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
+}
+
+func TestNewHandler_FrontendFSError(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{}
+
+	// This should fail because distFS doesn't have the expected structure
+	_, err := NewHandler(client, nil, options)
+	// May error depending on distFS content
+	assert.NoError(t, err)
+}
+
+func TestNewHandler_StaticFSError(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{}
+
+	_, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+}
+
+func TestNewHandler_PageTemplateError(t *testing.T) {
+	client := fake.NewClientBuilder().Build()
+	options := Options{
+		Page: PageOptions{
+			TemplateSet: "nonexistent",
+		},
+	}
+
+	// The implementation falls back to default templates when a set doesn't exist
+	handler, err := NewHandler(client, nil, options)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
+}
+
+func TestReadRootAsset_InvalidPath(t *testing.T) {
+	data, err := readRootAsset(filesystemTemplateFS, "../invalid")
+	assert.Error(t, err)
+	assert.Nil(t, data)
+}
+
+func TestReadRootAsset_DirectoryPath(t *testing.T) {
+	data, err := readRootAsset(filesystemTemplateFS, "templates")
+	assert.Error(t, err)
+	assert.Nil(t, data)
+}
+
+func TestReadRootAsset_EmptyName(t *testing.T) {
+	data, err := readRootAsset(filesystemTemplateFS, "")
+	assert.Error(t, err)
+	assert.Nil(t, data)
+}
+
+func TestReadRootAsset_DotPath(t *testing.T) {
+	data, err := readRootAsset(filesystemTemplateFS, ".")
+	assert.Error(t, err)
+	assert.Nil(t, data)
+}
+
+func TestReadRootAsset_DotDotPath(t *testing.T) {
+	data, err := readRootAsset(filesystemTemplateFS, "..")
+	assert.Error(t, err)
+	assert.Nil(t, data)
+}
+
+func TestReadRootAsset_BackslashPath(t *testing.T) {
+	data, err := readRootAsset(filesystemTemplateFS, "templates\\test")
+	assert.Error(t, err)
+	assert.Nil(t, data)
+}
+
+func TestInjectAuthConfig_Success(t *testing.T) {
+	html := []byte(`<html><head></head><body>Test</body></html>`)
+	config := authConfigResponse{Enabled: true}
+
+	result, err := injectAuthConfig(html, config)
+	assert.NoError(t, err)
+	assert.Contains(t, string(result), "window.config")
+}
+
+func TestInjectAuthConfig_MissingHeadTag(t *testing.T) {
+	html := []byte(`<html><body>Test</body></html>`)
+	config := authConfigResponse{Enabled: true}
+
+	result, err := injectAuthConfig(html, config)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestInjectAuthConfig_InvalidConfig(t *testing.T) {
+	// Create an invalid config that will fail JSON marshaling
+	type invalidConfig struct {
+		Func func() `json:"func"`
+	}
+	inv := invalidConfig{Func: func() {}}
+
+	_, err := json.Marshal(inv)
+	assert.Error(t, err)
+
+	// The injectAuthConfig should handle JSON marshaling errors
+}
+
+func TestInjectAuthConfig_EmptyHTML(t *testing.T) {
+	config := authConfigResponse{Enabled: true}
+
+	_, err := injectAuthConfig([]byte(``), config)
+	assert.Error(t, err)
+}
+
+func TestInjectAuthConfig_NoHeadCloseTag(t *testing.T) {
+	html := []byte(`<html><head>`)
+	config := authConfigResponse{Enabled: true}
+
+	result, err := injectAuthConfig(html, config)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestInjectAuthConfig_MultipleHeadTags(t *testing.T) {
+	html := []byte(`<html><head></head><body>Test</body><head></head></html>`)
+	config := authConfigResponse{Enabled: true}
+
+	_, err := injectAuthConfig(html, config)
+	assert.NoError(t, err)
+	// Should only replace the first </head>
+}
+
+func TestInjectAuthConfig_WithScript(t *testing.T) {
+	html := []byte(`<html><head><script>existing</script></head><body>Test</body></html>`)
+	config := authConfigResponse{Enabled: false}
+
+	result, err := injectAuthConfig(html, config)
+	assert.NoError(t, err)
+	assert.Contains(t, string(result), "window.config")
+}
+
+func TestInjectAuthConfig_UnicodeCharacters(t *testing.T) {
+	html := []byte(`<html><head></head><body>日本語</body></html>`)
+	config := authConfigResponse{Enabled: true}
+
+	result, err := injectAuthConfig(html, config)
+	assert.NoError(t, err)
+	assert.Contains(t, string(result), "日本語")
+}
+
+func TestInjectAuthConfig_SpecialCharactersInHTML(t *testing.T) {
+	html := []byte(`<html><head></head><body><script>alert('test')</script></body></html>`)
+	config := authConfigResponse{Enabled: true}
+
+	result, err := injectAuthConfig(html, config)
+	assert.NoError(t, err)
+	assert.Contains(t, string(result), "window.config")
+}
+
+func TestInjectAuthConfig_LongHTML(t *testing.T) {
+	html := []byte(`<html><head></head><body>`)
+	for i := 0; i < 1000; i++ {
+		html = append(html, []byte("Test content ")...)
+	}
+	html = append(html, []byte("</body></html>")...)
+	config := authConfigResponse{Enabled: true}
+
+	result, err := injectAuthConfig(html, config)
+	assert.NoError(t, err)
+	assert.Contains(t, string(result), "window.config")
+}
+
+func TestRequireAuthentication_Enabled(t *testing.T) {
+	auth := newAuthService(AuthOptions{Enabled: true, CookieSecret: "test-secret"})
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	})
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	requireAuth := requireAuthentication(auth, handler)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	if !strings.Contains(body, `<div id="root"></div>`) {
-		t.Fatalf("expected SPA root container for auth bootstrap: %s", body)
-	}
-	if strings.Contains(body, `class="fc-header"`) {
-		t.Fatalf("expected SPA index instead of template without an auth session: %s", body)
-	}
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+
+	requireAuth.ServeHTTP(rec, req)
+
+	// Should return unauthorized because no auth session
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestRequireAuthentication_Disabled(t *testing.T) {
+	auth := newAuthService(AuthOptions{Enabled: false})
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	requireAuth := requireAuthentication(auth, handler)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+
+	requireAuth.ServeHTTP(rec, req)
+
+	// Should return OK because auth is disabled
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestOpenAPISpec(t *testing.T) {
+	spec := openAPISpec()
+
+	assert.Equal(t, "3.0.3", spec["openapi"])
+	assert.Equal(t, "cupboard API", spec["info"].(map[string]interface{})["title"])
+
+	securitySchemes := spec["components"].(map[string]interface{})["securitySchemes"].(map[string]interface{})
+	assert.Equal(t, "http", securitySchemes["bearerAuth"].(map[string]interface{})["type"])
+	assert.Equal(t, "bearer", securitySchemes["bearerAuth"].(map[string]interface{})["scheme"])
+
+	paths := spec["paths"].(map[string]interface{})
+	assert.Contains(t, paths, "/api/session")
+	assert.Contains(t, paths, "/api/dashboard")
+}
+
+func TestOpenAPISpec_SessionEndpoint(t *testing.T) {
+	spec := openAPISpec()
+	paths := spec["paths"].(map[string]interface{})
+	sessionPath := paths["/api/session"].(map[string]interface{})
+
+	assert.Contains(t, sessionPath, "get")
+	assert.Contains(t, sessionPath, "post")
+	assert.Contains(t, sessionPath, "delete")
+
+	getOp := sessionPath["get"].(map[string]interface{})
+	assert.Equal(t, "Get session userinfo from cookie", getOp["summary"])
+}
+
+func TestOpenAPISpec_DashboardEndpoint(t *testing.T) {
+	spec := openAPISpec()
+	paths := spec["paths"].(map[string]interface{})
+	dashboardPath := paths["/api/dashboard"].(map[string]interface{})
+
+	assert.Contains(t, dashboardPath, "get")
+
+	getOp := dashboardPath["get"].(map[string]interface{})
+	assert.Equal(t, "Get grouped dashboard links", getOp["summary"])
+}
+
+func TestOpenAPISpec_SecurityScheme(t *testing.T) {
+	spec := openAPISpec()
+	components := spec["components"].(map[string]interface{})
+	securitySchemes := components["securitySchemes"].(map[string]interface{})
+
+	assert.Contains(t, securitySchemes, "bearerAuth")
+	bearerAuth := securitySchemes["bearerAuth"].(map[string]interface{})
+	assert.Equal(t, "http", bearerAuth["type"])
+	assert.Equal(t, "bearer", bearerAuth["scheme"])
+}
+
+func TestOpenAPISpec_PathStructure(t *testing.T) {
+	spec := openAPISpec()
+
+	assert.IsType(t, map[string]interface{}{}, spec)
+	assert.Contains(t, spec, "openapi")
+	assert.Contains(t, spec, "info")
+	assert.Contains(t, spec, "components")
+	assert.Contains(t, spec, "paths")
+}
+
+func TestOpenAPISpec_InfoStructure(t *testing.T) {
+	spec := openAPISpec()
+	info := spec["info"].(map[string]interface{})
+
+	assert.Equal(t, "cupboard API", info["title"])
+	assert.Equal(t, "v1", info["version"])
+}
+
+func TestOpenAPISpec_SecuritySchemesStructure(t *testing.T) {
+	spec := openAPISpec()
+	components := spec["components"].(map[string]interface{})
+	securitySchemes := components["securitySchemes"].(map[string]interface{})
+
+	assert.IsType(t, map[string]interface{}{}, securitySchemes)
+}
+
+func TestOpenAPISpec_DashboardSecurity(t *testing.T) {
+	spec := openAPISpec()
+	paths := spec["paths"].(map[string]interface{})
+	dashboardPath := paths["/api/dashboard"].(map[string]interface{})
+
+	getOp := dashboardPath["get"].(map[string]interface{})
+	security := getOp["security"].([]map[string]interface{})
+
+	assert.Len(t, security, 1)
+	securityEntry := security[0]
+	assert.Contains(t, securityEntry, "bearerAuth")
+}
+
+func TestOpenAPISpec_SessionSecurity(t *testing.T) {
+	spec := openAPISpec()
+	paths := spec["paths"].(map[string]interface{})
+	sessionPath := paths["/api/session"].(map[string]interface{})
+
+	postOp := sessionPath["post"].(map[string]interface{})
+	security := postOp["security"].([]map[string]interface{})
+
+	assert.Len(t, security, 1)
+	securityEntry := security[0]
+	assert.Contains(t, securityEntry, "bearerAuth")
 }

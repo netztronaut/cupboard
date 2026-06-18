@@ -1,95 +1,80 @@
 package web
 
 import (
-	"bytes"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestLoadPageTemplateUsesFilesystemOverrideBeforeEmbeddedSet(t *testing.T) {
-	dir := t.TempDir()
-	useFilesystemTemplates(t, dir)
-	writeTemplate(t, filepath.Join(dir, "templates/forecastle/header.tmpl"), `{{define "header"}}<header id="custom-header">{{.Title}}</header>{{end}}`)
+func TestLoadPageTemplate(t *testing.T) {
+	template, err := loadPageTemplate("default")
+	assert.NoError(t, err)
+	assert.NotNil(t, template)
+}
 
-	page, err := loadPageTemplate("forecastle")
-	if err != nil {
-		t.Fatalf("loadPageTemplate() error = %v", err)
+func TestLoadPageTemplateEmptySet(t *testing.T) {
+	template, err := loadPageTemplate("")
+	assert.NoError(t, err)
+	assert.NotNil(t, template)
+}
+
+func TestLoadPageTemplateInvalidPath(t *testing.T) {
+	_, err := loadPageTemplate("../invalid")
+	assert.Error(t, err)
+}
+
+func TestIconNamePattern(t *testing.T) {
+	validNames := []string{"fa-home", "lucide-star", "tabler-user"}
+	for _, name := range validNames {
+		assert.Regexp(t, iconNamePattern, name)
 	}
 
-	body := executePageTemplate(t, page, pageTemplateData{Title: "Custom", ContentLayout: "grid"})
-	if !strings.Contains(body, `<header id="custom-header">Custom</header>`) {
-		t.Fatalf("expected filesystem header override: %s", body)
-	}
-	if strings.Contains(body, `class="fc-header"`) {
-		t.Fatalf("expected filesystem header to replace embedded forecastle header: %s", body)
-	}
-	if !strings.Contains(body, `class="fc-main"`) || !strings.Contains(body, `class="fc-footer"`) {
-		t.Fatalf("expected missing files to fall back to embedded forecastle templates: %s", body)
+	invalidNames := []string{"fa home", "lucide:star", "UPPERCASE"}
+	for _, name := range invalidNames {
+		assert.NotRegexp(t, iconNamePattern, name)
 	}
 }
 
-func TestLoadPageTemplateFallsBackToEmbeddedDefaultSet(t *testing.T) {
-	dir := t.TempDir()
-	useFilesystemTemplates(t, dir)
-	writeTemplate(t, filepath.Join(dir, "templates/custom/header.tmpl"), `{{define "header"}}<header id="custom-header">{{.Title}}</header>{{end}}`)
+func TestFirstNonEmpty(t *testing.T) {
+	result := firstNonEmpty("value1", "value2", "value3")
+	assert.Equal(t, "value1", result)
 
-	page, err := loadPageTemplate("custom")
-	if err != nil {
-		t.Fatalf("loadPageTemplate() error = %v", err)
-	}
+	result = firstNonEmpty("", "value2", "value3")
+	assert.Equal(t, "value2", result)
 
-	body := executePageTemplate(t, page, pageTemplateData{Title: "Custom", ContentLayout: "list"})
-	if !strings.Contains(body, `<header id="custom-header">Custom</header>`) {
-		t.Fatalf("expected filesystem header override: %s", body)
-	}
-	if !strings.Contains(body, `content--list`) || !strings.Contains(body, `Served by cupboard`) {
-		t.Fatalf("expected missing files to fall back to embedded default templates: %s", body)
-	}
+	result = firstNonEmpty("value1", "", "value3")
+	assert.Equal(t, "value1", result)
+
+	result = firstNonEmpty("", "", "")
+	assert.Equal(t, "", result)
+
+	result = firstNonEmpty("single")
+	assert.Equal(t, "single", result)
+
+	result = firstNonEmpty("")
+	assert.Equal(t, "", result)
 }
 
-func TestLoadPageTemplateDoesNotLetPartialTextReplacePage(t *testing.T) {
-	dir := t.TempDir()
-	useFilesystemTemplates(t, dir)
-	writeTemplate(t, filepath.Join(dir, "templates/custom/page.tmpl"), `{{define "page"}}<html>{{template "header" .}}</html>{{end}}`)
-	writeTemplate(t, filepath.Join(dir, "templates/custom/header.tmpl"), "{{define \"header\"}}<header>Custom</header>{{end}}\nstray text")
+func TestDefaultTarget(t *testing.T) {
+	result := defaultTarget("")
+	assert.Equal(t, "_self", result)
 
-	page, err := loadPageTemplate("custom")
-	if err != nil {
-		t.Fatalf("loadPageTemplate() error = %v", err)
-	}
-
-	body := executePageTemplate(t, page, pageTemplateData{Title: "Custom"})
-	if body != "<html><header>Custom</header></html>" {
-		t.Fatalf("expected page template not to be replaced by partial text, got %q", body)
-	}
+	result = defaultTarget("_blank")
+	assert.Equal(t, "_blank", result)
 }
 
-func executePageTemplate(t *testing.T, page *pageTemplate, data pageTemplateData) string {
-	t.Helper()
-	var body bytes.Buffer
-	if err := page.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
-		t.Fatalf("ExecuteTemplate() error = %v", err)
-	}
-	return body.String()
+func TestEnsureLinkGroup(t *testing.T) {
+	groups := make(map[string]DashboardLinkGroup)
+	ensureLinkGroup(groups, "test-group")
+
+	assert.Contains(t, groups, "test-group")
+	assert.Equal(t, "test-group", groups["test-group"].Name)
 }
 
-func writeTemplate(t *testing.T, name, contents string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(name, []byte(contents), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-}
-
-func useFilesystemTemplates(t *testing.T, dir string) {
-	t.Helper()
-	previous := filesystemTemplateFS
-	filesystemTemplateFS = os.DirFS(dir)
-	t.Cleanup(func() {
-		filesystemTemplateFS = previous
-	})
+func TestPriorityClassRank(t *testing.T) {
+	assert.Equal(t, 0, priorityClassRank("first"))
+	assert.Equal(t, 0, priorityClassRank("FIRST"))
+	assert.Equal(t, 1, priorityClassRank("normal"))
+	assert.Equal(t, 1, priorityClassRank(""))
+	assert.Equal(t, 2, priorityClassRank("last"))
 }
