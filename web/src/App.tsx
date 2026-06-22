@@ -208,6 +208,15 @@ function App() {
       icon.startsWith('./') ||
       icon.startsWith('../'))
 
+  if (loading) {
+    return (
+      <div className="splash">
+        <h1>cupboard</h1>
+        <p>Loading…</p>
+      </div>
+    )
+  }
+
   return (
     <main className="app">
       <header>
@@ -218,8 +227,6 @@ function App() {
             <small>authentication disabled</small>
           ) : subject ? (
             <small>signed in as {subject}</small>
-          ) : loading ? (
-            <small>signing in…</small>
           ) : error ? (
             <small>sign-in unavailable</small>
           ) : (
@@ -231,7 +238,6 @@ function App() {
       <section className="panel">
         <h2>Bookmarks</h2>
         {error && <p className="error">{error}</p>}
-        {loading && <p>Loading…</p>}
         {!error && groups.length === 0 && <p>No bookmark data found yet.</p>}
         {groups.map((group) => (
           <article key={group.name} className="group">
