@@ -20,7 +20,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
+	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
 	// TODO (user): Add any additional imports if needed
 )
 

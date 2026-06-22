@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
+	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
 )
 
 func TestResolveURLFromSource(t *testing.T) {

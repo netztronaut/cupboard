@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
+	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
 )
 
 func ResolveURLFromSource(ctx context.Context, c client.Reader, namespace string, source *dashboardv1alpha1.URLSource) (string, error) {

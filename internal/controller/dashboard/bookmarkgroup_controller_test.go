@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
+	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
 )
 
 var _ = Describe("BookmarkGroup Controller", func() {

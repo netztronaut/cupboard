@@ -33,7 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
+	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 

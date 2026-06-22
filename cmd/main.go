@@ -46,11 +46,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
-	forecastlev1alpha1 "github.com/netztronaut/cupboard/api/forecastle/v1alpha1"
-	dashboardcontroller "github.com/netztronaut/cupboard/internal/controller/dashboard"
-	webhookdashboardv1alpha1 "github.com/netztronaut/cupboard/internal/webhook/dashboard/v1alpha1"
-	"github.com/netztronaut/cupboard/web"
+	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
+	forecastlev1alpha1 "netztronaut.de/cupboard/api/forecastle/v1alpha1"
+	dashboardcontroller "netztronaut.de/cupboard/internal/controller/dashboard"
+	webhookdashboardv1alpha1 "netztronaut.de/cupboard/internal/webhook/dashboard/v1alpha1"
+	"netztronaut.de/cupboard/web"
 	// +kubebuilder:scaffold:imports
 )
 

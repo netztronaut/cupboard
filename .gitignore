@@ -32,3 +32,4 @@ go.work
 *.md
 !AGENTS.md
 !README.md
+.DS_Store

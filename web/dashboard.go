@@ -15,9 +15,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	dashboardv1alpha1 "github.com/netztronaut/cupboard/api/dashboard/v1alpha1"
-	forecastlev1alpha1 "github.com/netztronaut/cupboard/api/forecastle/v1alpha1"
-	webhookdashboardv1alpha1 "github.com/netztronaut/cupboard/internal/webhook/dashboard/v1alpha1"
+	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
+	forecastlev1alpha1 "netztronaut.de/cupboard/api/forecastle/v1alpha1"
+	webhookdashboardv1alpha1 "netztronaut.de/cupboard/internal/webhook/dashboard/v1alpha1"
 )
 
 type dashboardDiscovery interface {

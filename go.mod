@@ -1,4 +1,4 @@
-module github.com/netztronaut/cupboard
+module netztronaut.de/cupboard
 
 go 1.26.0
 

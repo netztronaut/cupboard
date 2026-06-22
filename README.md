@@ -7,7 +7,7 @@
 - `autoupdate/v1-alpha`
 - `deploy-image/v1-alpha`
 
-The repository module is `github.com/netztronaut/cupboard`, and APIs use the `netztronaut.de` domain.
+The repository module is `netztronaut.de/cupboard`, and APIs use the `netztronaut.de` domain.
 
 ## Description
 The operator binary embeds a React/TypeScript web interface built from `web/` and serves it on `--web-bind-address` (default `:8082`).

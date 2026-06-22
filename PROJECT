@@ -17,7 +17,7 @@ plugins:
     manifests: dist/install.yaml
     output: dist
 projectName: cupboard
-repo: github.com/netztronaut/cupboard
+repo: netztronaut.de/cupboard
 resources:
 - api:
     crdVersion: v1
@@ -26,7 +26,7 @@ resources:
   domain: netztronaut.de
   group: dashboard
   kind: BookmarkGroup
-  path: github.com/netztronaut/cupboard/api/dashboard/v1alpha1
+  path: netztronaut.de/cupboard/api/dashboard/v1alpha1
   version: v1alpha1
   webhooks:
     validation: true
@@ -38,6 +38,6 @@ resources:
   domain: netztronaut.de
   group: dashboard
   kind: Bookmark
-  path: github.com/netztronaut/cupboard/api/dashboard/v1alpha1
+  path: netztronaut.de/cupboard/api/dashboard/v1alpha1
   version: v1alpha1
 version: "3"
