@@ -15,7 +15,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier) (http.Handler, error) {
+// Handler wraps the main HTTP mux and exposes the dashboard collector so callers
+// can build additional handlers (e.g. the sync server endpoint).
+type Handler struct {
+	handler   http.Handler
+	collector *dashboardCollector
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.handler.ServeHTTP(w, r)
+}
+
+// NewSyncHandler returns an http.Handler that serves local dashboard data
+// for consumption by peer instances.
+func (h *Handler) NewSyncHandler() http.Handler {
+	return newSyncHandler(h.collector)
+}
+
+func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier, syncClient *SyncClient) (*Handler, error) {
 	frontendFS, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, err
@@ -25,7 +42,7 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 		return nil, err
 	}
 	auth := newAuthService(options.Auth)
-	collector := newDashboardCollector(k8sClient, discovery, options)
+	collector := newDashboardCollector(k8sClient, discovery, options, syncClient)
 	collector.logMissingOptionalResources(context.Background())
 	pageTemplate, err := loadPageTemplate(options.Page.TemplateSet)
 	if err != nil {
@@ -134,7 +151,7 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 		if session, ok := authSessionFromContext(r.Context()); ok {
 			userGroups = session.Groups
 		}
-		payload, collectErr := collector.collectDashboard(r.Context(), userGroups)
+		payload, collectErr := collector.collectDashboard(r.Context(), userGroups, false)
 		if collectErr != nil {
 			http.Error(w, collectErr.Error(), http.StatusInternalServerError)
 			return
@@ -216,7 +233,7 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 		if session, ok := authSessionFromContext(r.Context()); ok {
 			userGroups = session.Groups
 		}
-		if dashboard, collectErr := collector.collectDashboard(r.Context(), userGroups); collectErr == nil {
+		if dashboard, collectErr := collector.collectDashboard(r.Context(), userGroups, false); collectErr == nil {
 			groups = dashboard.Groups
 		} else {
 			setupLog.Error(collectErr, "Could not collect dashboard for template render")
@@ -259,7 +276,7 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 		frontendIndexHandler.ServeHTTP(w, r)
 	})
 
-	return mux, nil
+	return &Handler{handler: mux, collector: collector}, nil
 }
 
 func readRootAsset(embeddedFS fs.FS, name string) ([]byte, error) {

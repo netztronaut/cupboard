@@ -31,15 +31,17 @@ type dashboardCollector struct {
 	forecastleInstance string
 	linkGroups         []LinkGroup
 	staticLinks        []StaticLink
+	syncClient         *SyncClient
 }
 
-func newDashboardCollector(reader client.Reader, discovery dashboardDiscovery, options Options) *dashboardCollector {
+func newDashboardCollector(reader client.Reader, discovery dashboardDiscovery, options Options, syncClient *SyncClient) *dashboardCollector {
 	return &dashboardCollector{
 		reader:             reader,
 		discovery:          discovery,
 		forecastleInstance: strings.TrimSpace(options.Forecastle.Instance),
 		linkGroups:         options.LinkGroups,
 		staticLinks:        options.StaticLinks,
+		syncClient:         syncClient,
 	}
 }
 
@@ -94,6 +96,7 @@ type DashboardGroup struct {
 	Name      string          `json:"name"`
 	LinkGroup string          `json:"linkGroup,omitempty"`
 	Links     []DashboardLink `json:"links"`
+	Source    string          `json:"source,omitempty"`
 }
 
 type DashboardLinkGroup struct {
@@ -101,6 +104,7 @@ type DashboardLinkGroup struct {
 	Priority      int    `json:"priority"`
 	PriorityClass string `json:"priorityClass,omitempty"`
 	DisplayName   string `json:"displayName"`
+	Source        string `json:"source,omitempty"`
 }
 
 type DashboardLink struct {
@@ -114,7 +118,10 @@ type DashboardLink struct {
 	Groups    []string `json:"groups,omitempty"`
 }
 
-func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []string) (DashboardResponse, error) {
+// collectDashboard gathers all dashboard data and returns a filtered response.
+// When localOnly is true, remote data from sync peers is excluded (used by the sync server
+// itself to prevent re-exporting peer data and avoid sync cycles).
+func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []string, localOnly bool) (DashboardResponse, error) {
 	groups := map[string][]DashboardLink{}
 	groupDetails := c.initLinkGroups()
 	c.collectStaticLinks(groups, groupDetails)
@@ -157,6 +164,10 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 		}
 	}
 
+	if !localOnly && c.syncClient != nil {
+		c.mergeRemoteData(groups, groupDetails)
+	}
+
 	orderedGroups := sortLinkGroups(groupDetails)
 	response := DashboardResponse{
 		LinkGroups: orderedGroups,
@@ -174,9 +185,50 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 			Name:      group.DisplayName,
 			LinkGroup: group.Name,
 			Links:     links,
+			Source:    group.Source,
 		})
 	}
 	return response, nil
+}
+
+func (c *dashboardCollector) mergeRemoteData(groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) {
+	remoteData := c.syncClient.GetRemoteData()
+	for peerURL, remoteResp := range remoteData {
+		source := "sync:" + peerURL
+
+		remoteLinkGroups := make(map[string]DashboardLinkGroup, len(remoteResp.LinkGroups))
+		for _, lg := range remoteResp.LinkGroups {
+			remoteLinkGroups[lg.Name] = lg
+		}
+
+		for _, group := range remoteResp.Groups {
+			groupName := group.LinkGroup
+			if groupName == "" {
+				groupName = group.Name
+			}
+			if _, ok := groupDetails[groupName]; !ok {
+				if remoteLG, ok := remoteLinkGroups[groupName]; ok {
+					groupDetails[groupName] = DashboardLinkGroup{
+						Name:          remoteLG.Name,
+						Priority:      remoteLG.Priority,
+						PriorityClass: remoteLG.PriorityClass,
+						DisplayName:   remoteLG.DisplayName,
+						Source:        source,
+					}
+				} else {
+					groupDetails[groupName] = DashboardLinkGroup{
+						Name:        groupName,
+						DisplayName: groupName,
+						Source:      source,
+					}
+				}
+			}
+			for _, link := range group.Links {
+				link.Source = source
+				groups[groupName] = append(groups[groupName], link)
+			}
+		}
+	}
 }
 
 func (c *dashboardCollector) initLinkGroups() map[string]DashboardLinkGroup {
@@ -195,6 +247,7 @@ func (c *dashboardCollector) initLinkGroups() map[string]DashboardLinkGroup {
 			Priority:      group.Priority,
 			PriorityClass: strings.TrimSpace(group.PriorityClass),
 			DisplayName:   displayName,
+			Source:        "local",
 		}
 	}
 	return result
@@ -613,6 +666,7 @@ func ensureLinkGroup(groups map[string]DashboardLinkGroup, name string) {
 	groups[name] = DashboardLinkGroup{
 		Name:        name,
 		DisplayName: name,
+		Source:      "local",
 	}
 }
 

@@ -128,6 +128,12 @@ func loadViperConfig(configFile string) (*viper.Viper, error) {
 	_ = v.BindEnv("page.faviconURL", "CUPBOARD_FAVICON_URL")
 	_ = v.BindEnv("page.templateSet", "CUPBOARD_TEMPLATE_SET")
 	_ = v.BindEnv("page.contentLayout", "CUPBOARD_CONTENT_LAYOUT")
+	_ = v.BindEnv("sync.bindAddress", "CUPBOARD_SYNC_BIND_ADDRESS")
+	_ = v.BindEnv("sync.tls.ca", "CUPBOARD_SYNC_TLS_CA")
+	_ = v.BindEnv("sync.tls.cert", "CUPBOARD_SYNC_TLS_CERT")
+	_ = v.BindEnv("sync.tls.key", "CUPBOARD_SYNC_TLS_KEY")
+	_ = v.BindEnv("sync.tls.authCert", "CUPBOARD_SYNC_TLS_AUTH_CERT")
+	_ = v.BindEnv("sync.tls.authKey", "CUPBOARD_SYNC_TLS_AUTH_KEY")
 
 	if strings.TrimSpace(configFile) == "" {
 		configFile = os.Getenv("CUPBOARD_CONFIG")
@@ -178,6 +184,16 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func splitCommaFlag(s string) []string {
+	var result []string
+	for part := range strings.SplitSeq(s, ",") {
+		if v := strings.TrimSpace(part); v != "" {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
 // nolint:gocyclo
 func main() {
 	var metricsAddr string
@@ -192,6 +208,14 @@ func main() {
 	var configFile string
 	enableAuth := true
 	var tlsOpts []func(*tls.Config)
+	var syncAddr string
+	var syncURLsFlag string
+	var syncSRVRecordsFlag string
+	var syncTLSCA string
+	var syncTLSCert string
+	var syncTLSKey string
+	var syncTLSAuthCert string
+	var syncTLSAuthKey string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -215,6 +239,14 @@ func main() {
 	flag.StringVar(&forecastleInstance, "forecastle-instance", "",
 		"Forecastle instance name used to filter ForecastleApp resources by spec.instance. Can also be controlled via CUPBOARD_FORECASTLE_INSTANCE env var.")
 	flag.StringVar(&configFile, "config", "", "Path to the cupboard configuration file (yaml/json/toml). Can also be set via CUPBOARD_CONFIG.")
+	flag.StringVar(&syncAddr, "sync-bind-address", ":8083", "The address the sync endpoint binds to. Leave empty to disable.")
+	flag.StringVar(&syncURLsFlag, "sync-urls", "", "Comma-separated list of peer URLs to synchronize with.")
+	flag.StringVar(&syncSRVRecordsFlag, "sync-srv-records", "", "Comma-separated list of DNS SRV record names for peer discovery.")
+	flag.StringVar(&syncTLSCA, "sync-tls-ca", "", "Path to CA certificate used to verify sync peers (trust store). When set with --sync-tls-cert/key, enables mTLS.")
+	flag.StringVar(&syncTLSCert, "sync-tls-cert", "", "Path to TLS certificate for the sync endpoint.")
+	flag.StringVar(&syncTLSKey, "sync-tls-key", "", "Path to TLS private key for the sync endpoint.")
+	flag.StringVar(&syncTLSAuthCert, "sync-tls-auth-cert", "", "Path to client certificate used when authenticating to sync peers. Defaults to --sync-tls-cert if unset.")
+	flag.StringVar(&syncTLSAuthKey, "sync-tls-auth-key", "", "Path to client private key used when authenticating to sync peers. Defaults to --sync-tls-key if unset.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -242,6 +274,26 @@ func main() {
 	enableHTTP2 = resolveBoolFlag(config, setFlags, "enable-http2", "http2.enabled", enableHTTP2)
 	enableAuth = resolveBoolFlag(config, setFlags, "enable-auth", "auth.enabled", enableAuth)
 	forecastleInstance = resolveStringFlag(config, setFlags, "forecastle-instance", "forecastle.instance", forecastleInstance)
+	syncAddr = resolveStringFlag(config, setFlags, "sync-bind-address", "sync.bindAddress", syncAddr)
+	syncTLSCA = resolveStringFlag(config, setFlags, "sync-tls-ca", "sync.tls.ca", syncTLSCA)
+	syncTLSCert = resolveStringFlag(config, setFlags, "sync-tls-cert", "sync.tls.cert", syncTLSCert)
+	syncTLSKey = resolveStringFlag(config, setFlags, "sync-tls-key", "sync.tls.key", syncTLSKey)
+	syncTLSAuthCert = resolveStringFlag(config, setFlags, "sync-tls-auth-cert", "sync.tls.authCert", syncTLSAuthCert)
+	syncTLSAuthKey = resolveStringFlag(config, setFlags, "sync-tls-auth-key", "sync.tls.authKey", syncTLSAuthKey)
+
+	// URLs and SRV records may be arrays in the config file or comma-separated in flags.
+	var syncURLs []string
+	if setFlags["sync-urls"] {
+		syncURLs = splitCommaFlag(syncURLsFlag)
+	} else if config.IsSet("sync.urls") {
+		syncURLs = config.GetStringSlice("sync.urls")
+	}
+	var syncSRVRecords []string
+	if setFlags["sync-srv-records"] {
+		syncSRVRecords = splitCommaFlag(syncSRVRecordsFlag)
+	} else if config.IsSet("sync.srvRecords") {
+		syncSRVRecords = config.GetStringSlice("sync.srvRecords")
+	}
 
 	localTesting := config.GetBool("localTesting")
 	enableWebhooks := true
@@ -407,6 +459,31 @@ func main() {
 	}
 	setupDashboardWatches(mgr, notifier, discoveryClient)
 
+	syncOptions := web.SyncOptions{
+		BindAddress: syncAddr,
+		URLs:        syncURLs,
+		SRVRecords:  syncSRVRecords,
+		TLS: web.SyncTLSOptions{
+			CA:       syncTLSCA,
+			Cert:     syncTLSCert,
+			Key:      syncTLSKey,
+			AuthCert: syncTLSAuthCert,
+			AuthKey:  syncTLSAuthKey,
+		},
+	}
+	var syncClient *web.SyncClient
+	if len(syncURLs) > 0 || len(syncSRVRecords) > 0 {
+		syncClient, err = web.NewSyncClient(syncOptions)
+		if err != nil {
+			setupLog.Error(err, "Failed to initialize sync client")
+			os.Exit(1)
+		}
+		if err := mgr.Add(syncClient); err != nil {
+			setupLog.Error(err, "Failed to add sync client runnable")
+			os.Exit(1)
+		}
+	}
+
 	webHandler, err := web.NewHandler(mgr.GetClient(), discoveryClient, web.Options{
 		Auth: web.AuthOptions{
 			Enabled:             enableAuth,
@@ -428,7 +505,7 @@ func main() {
 			FaviconURL:    firstNonEmpty(config.GetString("page.faviconURL"), config.GetString("web.faviconURL")),
 			ContentLayout: firstNonEmpty(config.GetString("page.contentLayout"), config.GetString("web.contentLayout")),
 		},
-	}, notifier)
+	}, notifier, syncClient)
 	if err != nil {
 		setupLog.Error(err, "Failed to initialize embedded web interface")
 		os.Exit(1)
@@ -458,6 +535,45 @@ func main() {
 	})); err != nil {
 		setupLog.Error(err, "Failed to add embedded web interface runnable")
 		os.Exit(1)
+	}
+
+	if strings.TrimSpace(syncAddr) != "" {
+		syncTLSConfig, syncTLSErr := web.BuildSyncServerTLSConfig(syncOptions.TLS)
+		if syncTLSErr != nil {
+			setupLog.Error(syncTLSErr, "Failed to build sync server TLS configuration")
+			os.Exit(1)
+		}
+		syncServerHandler := webHandler.NewSyncHandler()
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			server := &http.Server{
+				Addr:              syncAddr,
+				Handler:           syncServerHandler,
+				ReadHeaderTimeout: 5 * time.Second,
+				TLSConfig:         syncTLSConfig,
+			}
+			go func() {
+				<-ctx.Done()
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if shutdownErr := server.Shutdown(shutdownCtx); shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
+					setupLog.Error(shutdownErr, "Failed to shutdown sync endpoint")
+				}
+			}()
+			setupLog.Info("Starting sync endpoint", "address", syncAddr, "tls", syncTLSConfig != nil)
+			if syncTLSConfig != nil {
+				if serveErr := server.ListenAndServeTLS("", ""); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+					return serveErr
+				}
+			} else {
+				if serveErr := server.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+					return serveErr
+				}
+			}
+			return nil
+		})); err != nil {
+			setupLog.Error(err, "Failed to add sync endpoint runnable")
+			os.Exit(1)
+		}
 	}
 
 	if err := (&dashboardcontroller.BookmarkGroupReconciler{

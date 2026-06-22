@@ -192,14 +192,14 @@ func TestDashboardNotifier_NotifyBroadcast(t *testing.T) {
 
 func TestNewHandler_Success(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
-	handler, err := NewHandler(c, nil, Options{}, NewDashboardNotifier())
+	handler, err := NewHandler(c, nil, Options{}, NewDashboardNotifier(), nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
 func TestNewHandler_EmptyOptions(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
-	handler, err := NewHandler(c, nil, Options{}, NewDashboardNotifier())
+	handler, err := NewHandler(c, nil, Options{}, NewDashboardNotifier(), nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
@@ -208,7 +208,7 @@ func TestNewHandler_WithAuth(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
 	handler, err := NewHandler(c, nil, Options{
 		Auth: AuthOptions{Enabled: true, CookieSecret: "test-secret"},
-	}, NewDashboardNotifier())
+	}, NewDashboardNotifier(), nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
@@ -217,7 +217,7 @@ func TestNewHandler_WithLinkGroups(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
 	handler, err := NewHandler(c, nil, Options{
 		LinkGroups: []LinkGroup{{Name: "group1", Priority: 10}},
-	}, NewDashboardNotifier())
+	}, NewDashboardNotifier(), nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
@@ -226,7 +226,7 @@ func TestNewHandler_WithStaticLinks(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
 	handler, err := NewHandler(c, nil, Options{
 		StaticLinks: []StaticLink{{Name: "link1", URL: "https://example.com"}},
-	}, NewDashboardNotifier())
+	}, NewDashboardNotifier(), nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
@@ -235,7 +235,7 @@ func TestNewHandler_WithPageOptions(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
 	handler, err := NewHandler(c, nil, Options{
 		Page: PageOptions{Title: "Test Title", FaviconURL: "/favicon.ico", ContentLayout: "grid"},
-	}, NewDashboardNotifier())
+	}, NewDashboardNotifier(), nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
@@ -244,7 +244,7 @@ func TestNewHandler_WithForecastleOptions(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
 	handler, err := NewHandler(c, nil, Options{
 		Forecastle: ForecastleOptions{Instance: "test-instance"},
-	}, NewDashboardNotifier())
+	}, NewDashboardNotifier(), nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
@@ -253,7 +253,7 @@ func TestNewHandler_PageTemplateError(t *testing.T) {
 	c := fake.NewClientBuilder().Build()
 	handler, err := NewHandler(c, nil, Options{
 		Page: PageOptions{TemplateSet: "nonexistent"},
-	}, NewDashboardNotifier())
+	}, NewDashboardNotifier(), nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }

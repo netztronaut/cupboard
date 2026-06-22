@@ -45,3 +45,18 @@ type LinkGroup struct {
 	PriorityClass string
 	DisplayName   string
 }
+
+type SyncOptions struct {
+	BindAddress string
+	URLs        []string
+	SRVRecords  []string
+	TLS         SyncTLSOptions
+}
+
+type SyncTLSOptions struct {
+	CA       string
+	Cert     string
+	Key      string
+	AuthCert string
+	AuthKey  string
+}
