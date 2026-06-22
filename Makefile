@@ -127,7 +127,7 @@ run: web-build manifests generate fmt vet ## Run a controller from your host.
 		fi; \
 		echo ""; \
 		echo "✓ Manager deployed to kind cluster"; \
-		echo "  Web interface: http://localhost:8082/"; \
+		echo "  Web interface: http://cupboard.localhost/"; \
 		echo "  Webhook server: localhost:9443"; \
 		echo ""; \
 		echo "Streaming manager logs (Ctrl+C to stop):"; \
@@ -136,8 +136,21 @@ run: web-build manifests generate fmt vet ## Run a controller from your host.
 		ENABLE_WEBHOOKS=$(ENABLE_WEBHOOKS) ENABLE_AUTH=$(ENABLE_AUTH) go run ./cmd/main.go; \
 	fi
 
+LOCAL_TESTING_HOSTS = cupboard.localhost auth.localhost
+
+.PHONY: setup-hosts
+setup-hosts: ## Add local-testing hostnames to /etc/hosts (requires sudo)
+	@for host in $(LOCAL_TESTING_HOSTS); do \
+		if grep -qF "$$host" /etc/hosts; then \
+			echo "/etc/hosts: $$host already present, skipping."; \
+		else \
+			echo "Adding 127.0.0.1 $$host to /etc/hosts (requires sudo)..."; \
+			echo "127.0.0.1 $$host" | sudo tee -a /etc/hosts; \
+		fi; \
+	done
+
 .PHONY: setup-kind
-setup-kind: ## Set up a Kind cluster for LOCAL_TESTING if it does not exist
+setup-kind: setup-hosts ## Set up a Kind cluster for LOCAL_TESTING if it does not exist
 	@command -v $(KIND) >/dev/null 2>&1 || { \
 		echo "Kind is not installed. Please install Kind manually."; \
 		exit 1; \
@@ -146,10 +159,23 @@ setup-kind: ## Set up a Kind cluster for LOCAL_TESTING if it does not exist
 		echo "Kind cluster '$(LOCAL_TESTING_KIND_CLUSTER)' already exists. Skipping creation."; \
 	else \
 		echo "Creating Kind cluster '$(LOCAL_TESTING_KIND_CLUSTER)'..."; \
-		$(KIND) create cluster --name $(LOCAL_TESTING_KIND_CLUSTER) --image kindest/node:v1.35.0; \
+		$(KIND) create cluster --name $(LOCAL_TESTING_KIND_CLUSTER) --image kindest/node:v1.36.1 --config config/local-testing/kind-config.yaml; \
+		echo "Waiting for control-plane node to be ready..."; \
+		$(KUBECTL) wait --for=condition=Ready node/$(LOCAL_TESTING_KIND_CLUSTER)-control-plane --timeout=120s --context $(LOCAL_TESTING_KIND_CONTEXT); \
 		echo "Installing CRDs..."; \
 		$(KUBECTL) apply -f config/crd/bases/ --context $(LOCAL_TESTING_KIND_CONTEXT); \
 	fi
+	@echo "Installing Traefik..."
+	@$(HELM) repo add traefik https://traefik.github.io/charts --force-update
+	@$(HELM) repo update
+	@$(HELM) upgrade --install traefik traefik/traefik \
+		-n traefik --create-namespace \
+		--set "service.type=ClusterIP" \
+		--set "tolerations[0].key=node-role.kubernetes.io/control-plane" \
+		--set "tolerations[0].operator=Exists" \
+		--set "tolerations[0].effect=NoSchedule" \
+		--wait \
+		--kube-context $(LOCAL_TESTING_KIND_CONTEXT)
 	@echo "Ensuring kubeconfig context '$(LOCAL_TESTING_KIND_CONTEXT)' is available..."
 	$(KIND) export kubeconfig --name $(LOCAL_TESTING_KIND_CLUSTER)
 	@echo "Creating local-testing namespace..."
