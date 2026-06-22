@@ -18,7 +18,7 @@ import (
 //go:embed templates/**/*.tmpl
 var templateFS embed.FS
 
-var pageTemplateFileNames = []string{"page", "header", "footer", "content", "group", "link"}
+var pageTemplateFileNames = []string{"page", "header", "footer", "content", "group", "link", "tile"}
 
 var filesystemTemplateFS = managerDirectoryFS()
 
@@ -43,6 +43,9 @@ func loadPageTemplate(set string) (*pageTemplate, error) {
 	}
 
 	parsed := template.New("page").Funcs(template.FuncMap{
+		"safeHTML": func(s string) template.HTML {
+			return template.HTML(s) //nolint:gosec
+		},
 		"isFontAwesomeKey": func(value string) bool {
 			return strings.HasPrefix(strings.TrimSpace(value), "fa-")
 		},

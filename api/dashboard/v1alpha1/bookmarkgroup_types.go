@@ -31,6 +31,12 @@ type BookmarkGroupSpec struct {
 	// When omitted or empty, the group is created but contains no links.
 	// +optional
 	Links []BookmarkLink `json:"links,omitempty"`
+
+	// Replicate controls whether this group and its links are included in the
+	// synchronization API response served to peer cupboard instances.
+	// When false (the default) the group is only visible on the local dashboard.
+	// +optional
+	Replicate bool `json:"replicate,omitempty"`
 }
 
 // BookmarkGroupStatus defines the observed state of BookmarkGroup.

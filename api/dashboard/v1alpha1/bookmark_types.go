@@ -60,6 +60,13 @@ type BookmarkSpec struct {
 	// +optional
 	NetworkRestricted bool `json:"networkRestricted,omitempty"`
 
+	// Replicate controls whether this bookmark's group is included in the
+	// synchronization API response served to peer cupboard instances.
+	// When true, the controller sets Replicate=true on the managed BookmarkGroup.
+	// When false (the default) the group is only visible on the local dashboard.
+	// +optional
+	Replicate bool `json:"replicate,omitempty"`
+
 	// Properties allows free-form metadata, compatible with Forecastle.
 	// +optional
 	Properties map[string]string `json:"properties,omitempty"`

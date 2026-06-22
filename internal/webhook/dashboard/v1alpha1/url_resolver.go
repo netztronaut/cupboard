@@ -130,7 +130,7 @@ func resolveTraefikIngressRouteURL(ctx context.Context, c client.Reader, namespa
 					continue
 				}
 				match, _ := routeMap["match"].(string)
-				if host := extractHostFromTraefikMatch(match); host != "" {
+				if host := ExtractHostFromTraefikMatch(match); host != "" {
 					return "https://" + host, nil
 				}
 			}
@@ -140,7 +140,7 @@ func resolveTraefikIngressRouteURL(ctx context.Context, c client.Reader, namespa
 	return "", fmt.Errorf("ingressRouteRef %q not found", name)
 }
 
-func extractHostFromTraefikMatch(match string) string {
+func ExtractHostFromTraefikMatch(match string) string {
 	start := strings.Index(match, "Host(`")
 	if start < 0 {
 		return ""

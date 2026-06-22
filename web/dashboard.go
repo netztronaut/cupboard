@@ -18,6 +18,7 @@ import (
 
 	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
 	forecastlev1alpha1 "netztronaut.de/cupboard/api/forecastle/v1alpha1"
+	"netztronaut.de/cupboard/internal/foreigncluster"
 	webhookdashboardv1alpha1 "netztronaut.de/cupboard/internal/webhook/dashboard/v1alpha1"
 )
 
@@ -32,9 +33,10 @@ type dashboardCollector struct {
 	linkGroups         []LinkGroup
 	staticLinks        []StaticLink
 	syncClient         *SyncClient
+	foreignClusters    *foreigncluster.Manager
 }
 
-func newDashboardCollector(reader client.Reader, discovery dashboardDiscovery, options Options, syncClient *SyncClient) *dashboardCollector {
+func newDashboardCollector(reader client.Reader, discovery dashboardDiscovery, options Options, syncClient *SyncClient, foreignClusters *foreigncluster.Manager) *dashboardCollector {
 	return &dashboardCollector{
 		reader:             reader,
 		discovery:          discovery,
@@ -42,6 +44,7 @@ func newDashboardCollector(reader client.Reader, discovery dashboardDiscovery, o
 		linkGroups:         options.LinkGroups,
 		staticLinks:        options.StaticLinks,
 		syncClient:         syncClient,
+		foreignClusters:    foreignClusters,
 	}
 }
 
@@ -50,22 +53,24 @@ var setupLog = ctrl.Log.WithName("web").WithName("dashboard")
 const (
 	labelEnabled = "cupboard.netztronaut.de/enabled"
 
-	annotationGroup   = "cupboard.netztronaut.de/group"
-	annotationName    = "cupboard.netztronaut.de/name"
-	annotationURL     = "cupboard.netztronaut.de/url"
-	annotationTarget  = "cupboard.netztronaut.de/target"
-	annotationIcon    = "cupboard.netztronaut.de/icon"
-	annotationIconURL = "cupboard.netztronaut.de/icon-url"
+	annotationGroup     = "cupboard.netztronaut.de/group"
+	annotationName      = "cupboard.netztronaut.de/name"
+	annotationURL       = "cupboard.netztronaut.de/url"
+	annotationTarget    = "cupboard.netztronaut.de/target"
+	annotationIcon      = "cupboard.netztronaut.de/icon"
+	annotationIconURL   = "cupboard.netztronaut.de/icon-url"
+	annotationReplicate = "cupboard.netztronaut.de/replicate"
 
 	allLinkGroupsWildcard = "\x00all-link-groups"
 )
 
 type resourceMeta struct {
-	Group  string
-	Name   string
-	URL    string
-	Target string
-	Icon   string
+	Group     string
+	Name      string
+	URL       string
+	Target    string
+	Icon      string
+	Replicate bool
 }
 
 func resourceMetaFrom(obj metav1.Object) resourceMeta {
@@ -79,11 +84,12 @@ func resourceMetaFrom(obj metav1.Object) resourceMeta {
 		name = obj.GetName()
 	}
 	return resourceMeta{
-		Group:  group,
-		Name:   name,
-		URL:    ann[annotationURL],
-		Target: defaultTarget(ann[annotationTarget]),
-		Icon:   firstNonEmpty(ann[annotationIcon], ann[annotationIconURL]),
+		Group:     group,
+		Name:      name,
+		URL:       ann[annotationURL],
+		Target:    defaultTarget(ann[annotationTarget]),
+		Icon:      firstNonEmpty(ann[annotationIcon], ann[annotationIconURL]),
+		Replicate: ann[annotationReplicate] == "true",
 	}
 }
 
@@ -93,10 +99,23 @@ type DashboardResponse struct {
 }
 
 type DashboardGroup struct {
-	Name      string          `json:"name"`
-	LinkGroup string          `json:"linkGroup,omitempty"`
-	Links     []DashboardLink `json:"links"`
-	Source    string          `json:"source,omitempty"`
+	Name      string              `json:"name"`
+	LinkGroup string              `json:"linkGroup,omitempty"`
+	Links     []DashboardLink     `json:"links"`
+	Tiles     []DashboardInfoTile `json:"tiles,omitempty"`
+	Source    string              `json:"source,omitempty"`
+}
+
+// DashboardInfoTile is the serialised form of an InfoTile sent to clients.
+type DashboardInfoTile struct {
+	Name    string `json:"name"`
+	Icon    string `json:"icon,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Target  string `json:"target,omitempty"`
+	Source  string `json:"source,omitempty"`
+	Content string `json:"content,omitempty"`
+	// Replicate is an in-process flag; never serialised.
+	Replicate bool `json:"-"`
 }
 
 type DashboardLinkGroup struct {
@@ -116,6 +135,9 @@ type DashboardLink struct {
 	Source    string   `json:"source,omitempty"`
 	Metadata  string   `json:"metadata,omitempty"`
 	Groups    []string `json:"groups,omitempty"`
+	// Replicate is an in-process flag that marks whether this link may be served
+	// via the synchronization API.  It is never serialized to JSON.
+	Replicate bool `json:"-"`
 }
 
 // collectDashboard gathers all dashboard data and returns a filtered response.
@@ -123,6 +145,7 @@ type DashboardLink struct {
 // itself to prevent re-exporting peer data and avoid sync cycles).
 func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []string, localOnly bool) (DashboardResponse, error) {
 	groups := map[string][]DashboardLink{}
+	tiles := map[string][]DashboardInfoTile{}
 	groupDetails := c.initLinkGroups()
 	c.collectStaticLinks(groups, groupDetails)
 
@@ -176,9 +199,25 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 			return DashboardResponse{}, err
 		}
 	}
+	if err := collectInfoTiles(ctx, c.reader, tiles, groupDetails); err != nil {
+		return DashboardResponse{}, err
+	}
 
 	if !localOnly && c.syncClient != nil {
 		c.mergeRemoteData(groups, groupDetails)
+	}
+	if !localOnly && c.foreignClusters != nil {
+		c.mergeForeignClusterData(ctx, groups, groupDetails)
+	}
+
+	// In the sync path only expose items explicitly marked for replication.
+	if localOnly {
+		for name, links := range groups {
+			groups[name] = filterLinksForReplication(links)
+		}
+		for name, ts := range tiles {
+			tiles[name] = filterTilesForReplication(ts)
+		}
 	}
 
 	orderedGroups := sortLinkGroups(groupDetails)
@@ -188,16 +227,21 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 	}
 	for _, group := range orderedGroups {
 		links := filterLinksForGroups(groups[group.Name], userGroups)
-		if len(links) == 0 {
+		groupTiles := tiles[group.Name]
+		if len(links) == 0 && len(groupTiles) == 0 {
 			continue
 		}
 		sort.SliceStable(links, func(i, j int) bool {
 			return strings.ToLower(links[i].Name) < strings.ToLower(links[j].Name)
 		})
+		sort.SliceStable(groupTiles, func(i, j int) bool {
+			return strings.ToLower(groupTiles[i].Name) < strings.ToLower(groupTiles[j].Name)
+		})
 		response.Groups = append(response.Groups, DashboardGroup{
 			Name:      group.DisplayName,
 			LinkGroup: group.Name,
 			Links:     links,
+			Tiles:     groupTiles,
 			Source:    group.Source,
 		})
 	}
@@ -240,6 +284,91 @@ func (c *dashboardCollector) mergeRemoteData(groups map[string][]DashboardLink, 
 				link.Source = source
 				groups[groupName] = append(groups[groupName], link)
 			}
+		}
+	}
+}
+
+// mergeForeignClusterData collects dashboard links from every reachable foreign cluster
+// and merges them into the local groups/groupDetails maps.  Errors per-cluster are
+// logged as warnings and skipped so a single unavailable cluster never breaks the
+// dashboard for the rest.
+func (c *dashboardCollector) mergeForeignClusterData(ctx context.Context, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) {
+	for _, fc := range c.foreignClusters.ActiveClusters() {
+		source := "foreign:" + fc.Name
+		tempGroups := map[string][]DashboardLink{}
+		tempGroupDetails := map[string]DashboardLinkGroup{}
+
+		mini := &dashboardCollector{
+			reader:    fc.Client,
+			discovery: fc.Discovery,
+		}
+		collectForeignLinks(ctx, mini, tempGroups, tempGroupDetails)
+
+		// Merge into main maps, stamping the source.
+		for groupName, links := range tempGroups {
+			replicatedLinks := filterLinksForReplication(links)
+			if len(replicatedLinks) == 0 {
+				continue
+			}
+			if _, ok := groupDetails[groupName]; !ok {
+				if detail, ok2 := tempGroupDetails[groupName]; ok2 {
+					detail.Source = source
+					groupDetails[groupName] = detail
+				} else {
+					groupDetails[groupName] = DashboardLinkGroup{
+						Name:        groupName,
+						DisplayName: groupName,
+						Source:      source,
+					}
+				}
+			}
+			for _, link := range replicatedLinks {
+				link.Source = source + ":" + link.Source
+				groups[groupName] = append(groups[groupName], link)
+			}
+		}
+	}
+}
+
+// collectForeignLinks runs the subset of collect functions that make sense on a
+// foreign cluster: it excludes BookmarkGroups and infrastructure-only resources
+// (EndpointSlice, DNSEndpoint) while keeping Ingress, Service, HTTPRoute, etc.
+func collectForeignLinks(ctx context.Context, c *dashboardCollector, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) {
+	if err := collectIngresses(ctx, c.reader, groups, groupDetails); err != nil {
+		setupLog.Info("Skipping Ingress collection from foreign cluster", "error", err.Error())
+	}
+	if err := collectServices(ctx, c.reader, groups, groupDetails); err != nil {
+		setupLog.Info("Skipping Service collection from foreign cluster", "error", err.Error())
+	}
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, "HTTPRoute") {
+		if err := collectHTTPRoutes(ctx, c.reader, groups, groupDetails); err != nil {
+			setupLog.Info("Skipping HTTPRoute collection from foreign cluster", "error", err.Error())
+		}
+	}
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, "TLSRoute") {
+		if err := collectTLSRoutes(ctx, c.reader, groups, groupDetails); err != nil {
+			setupLog.Info("Skipping TLSRoute collection from foreign cluster", "error", err.Error())
+		}
+	}
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, "TCPRoute") {
+		if err := collectTCPRoutes(ctx, c.reader, groups, groupDetails); err != nil {
+			setupLog.Info("Skipping TCPRoute collection from foreign cluster", "error", err.Error())
+		}
+	}
+	for _, traefikGV := range []schema.GroupVersion{
+		{Group: "traefik.io", Version: "v1alpha1"},
+		{Group: "traefik.containo.us", Version: "v1alpha1"},
+	} {
+		if c.resourceAvailable(ctx, traefikGV, "IngressRoute") {
+			if err := collectIngressRoutes(ctx, c.reader, traefikGV, groups, groupDetails); err != nil {
+				setupLog.Info("Skipping IngressRoute collection from foreign cluster", "error", err.Error())
+			}
+			break
+		}
+	}
+	if c.resourceAvailable(ctx, forecastlev1alpha1.GroupVersion, "ForecastleApp") {
+		if err := c.collectForecastleApps(ctx, groups, groupDetails); err != nil {
+			setupLog.Info("Skipping ForecastleApp collection from foreign cluster", "error", err.Error())
 		}
 	}
 }
@@ -297,6 +426,9 @@ func (c *dashboardCollector) logMissingOptionalResources(ctx context.Context) {
 		{groupVersion: schema.GroupVersion{Group: "networking.k8s.io", Version: "v1"}, kind: "Ingress"},
 		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, kind: "HTTPRoute"},
 		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, kind: "TLSRoute"},
+		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, kind: "TCPRoute"},
+		{groupVersion: schema.GroupVersion{Group: "traefik.io", Version: "v1alpha1"}, kind: "IngressRoute"},
+		{groupVersion: schema.GroupVersion{Group: "traefik.containo.us", Version: "v1alpha1"}, kind: "IngressRoute"},
 		{groupVersion: schema.GroupVersion{Group: "externaldns.k8s.io", Version: "v1alpha1"}, kind: "DNSEndpoint"},
 	} {
 		if !c.resourceAvailable(ctx, resource.groupVersion, resource.kind) {
@@ -348,12 +480,13 @@ func collectBookmarkGroups(ctx context.Context, c client.Reader, groups map[stri
 				target = string(dashboardv1alpha1.BookmarkLinkTargetSelf)
 			}
 			groups[groupName] = append(groups[groupName], DashboardLink{
-				Name:   link.Name,
-				URL:    url,
-				Target: target,
-				Icon:   link.Icon,
-				Source: "bookmarkgroup",
-				Groups: normalizedGroups(link.Groups),
+				Name:      link.Name,
+				URL:       url,
+				Target:    target,
+				Icon:      link.Icon,
+				Source:    "bookmarkgroup",
+				Groups:    normalizedGroups(link.Groups),
+				Replicate: item.Spec.Replicate,
 			})
 		}
 	}
@@ -393,12 +526,13 @@ func (c *dashboardCollector) collectForecastleApps(ctx context.Context, groups m
 		}
 		ensureLinkGroup(groupDetails, groupName)
 		groups[groupName] = append(groups[groupName], DashboardLink{
-			Name:   linkName,
-			URL:    url,
-			Target: target,
-			Icon:   icon,
-			Source: "forecastleapp",
-			Groups: normalizedGroups(item.Spec.Groups),
+			Name:      linkName,
+			URL:       url,
+			Target:    target,
+			Icon:      icon,
+			Source:    "forecastleapp",
+			Groups:    normalizedGroups(item.Spec.Groups),
+			Replicate: item.GetAnnotations()[annotationReplicate] == "true",
 		})
 	}
 	return nil
@@ -458,11 +592,12 @@ func collectIngresses(ctx context.Context, c client.Reader, groups map[string][]
 		}
 		ensureLinkGroup(groupDetails, meta.Group)
 		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "ingress",
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "ingress",
+			Replicate: meta.Replicate,
 		})
 	}
 	return nil
@@ -495,11 +630,12 @@ func collectHTTPRoutes(ctx context.Context, c client.Reader, groups map[string][
 		}
 		ensureLinkGroup(groupDetails, meta.Group)
 		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "httproute",
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "httproute",
+			Replicate: meta.Replicate,
 		})
 	}
 	return nil
@@ -532,11 +668,12 @@ func collectTLSRoutes(ctx context.Context, c client.Reader, groups map[string][]
 		}
 		ensureLinkGroup(groupDetails, meta.Group)
 		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "tlsroute",
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "tlsroute",
+			Replicate: meta.Replicate,
 		})
 	}
 	return nil
@@ -559,11 +696,12 @@ func collectTCPRoutes(ctx context.Context, c client.Reader, groups map[string][]
 		}
 		ensureLinkGroup(groupDetails, meta.Group)
 		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "tcproute",
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "tcproute",
+			Replicate: meta.Replicate,
 		})
 	}
 	return nil
@@ -602,11 +740,12 @@ func collectIngressRoutes(ctx context.Context, c client.Reader, gv schema.GroupV
 		}
 		ensureLinkGroup(groupDetails, meta.Group)
 		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "ingressroute",
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "ingressroute",
+			Replicate: meta.Replicate,
 		})
 	}
 	return nil
@@ -644,11 +783,12 @@ func collectServices(ctx context.Context, c client.Reader, groups map[string][]D
 		}
 		ensureLinkGroup(groupDetails, meta.Group)
 		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "service",
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "service",
+			Replicate: meta.Replicate,
 		})
 	}
 	return nil
@@ -666,11 +806,12 @@ func collectEndpointSlices(ctx context.Context, c client.Reader, groups map[stri
 		}
 		ensureLinkGroup(groupDetails, meta.Group)
 		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "endpointslice",
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "endpointslice",
+			Replicate: meta.Replicate,
 		})
 	}
 	return nil
@@ -707,11 +848,12 @@ func collectDNSEndpoints(ctx context.Context, c client.Reader, groups map[string
 		}
 		ensureLinkGroup(groupDetails, meta.Group)
 		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "dnsendpoint",
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "dnsendpoint",
+			Replicate: meta.Replicate,
 		})
 	}
 	return nil
@@ -742,6 +884,18 @@ func ensureLinkGroup(groups map[string]DashboardLinkGroup, name string) {
 		DisplayName: name,
 		Source:      "local",
 	}
+}
+
+// filterLinksForReplication returns only the links that have Replicate=true.
+// Used by the sync endpoint to avoid leaking local-only entries to peers.
+func filterLinksForReplication(links []DashboardLink) []DashboardLink {
+	out := make([]DashboardLink, 0, len(links))
+	for _, l := range links {
+		if l.Replicate {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 func filterLinksForGroups(links []DashboardLink, userGroups []string) []DashboardLink {
@@ -803,6 +957,46 @@ func sortLinkGroups(groups map[string]DashboardLinkGroup) []DashboardLinkGroup {
 		return 0
 	})
 	return result
+}
+
+func collectInfoTiles(ctx context.Context, c client.Reader, tiles map[string][]DashboardInfoTile, groupDetails map[string]DashboardLinkGroup) error {
+	var list dashboardv1alpha1.InfoTileList
+	if err := c.List(ctx, &list); err != nil {
+		return fmt.Errorf("list InfoTiles: %w", err)
+	}
+	for _, item := range list.Items {
+		groupName := strings.TrimSpace(item.Spec.Group)
+		if groupName == "" {
+			groupName = item.Name
+		}
+		if _, ok := groupDetails[groupName]; !ok {
+			groupDetails[groupName] = DashboardLinkGroup{
+				Name:        groupName,
+				DisplayName: groupName,
+				Source:      "infotile",
+			}
+		}
+		tiles[groupName] = append(tiles[groupName], DashboardInfoTile{
+			Name:      item.Spec.Name,
+			Icon:      item.Spec.Icon,
+			URL:       item.Spec.URL,
+			Target:    defaultTarget(item.Spec.Target),
+			Source:    item.Spec.Source,
+			Content:   item.Status.Content,
+			Replicate: item.Spec.Replicate,
+		})
+	}
+	return nil
+}
+
+func filterTilesForReplication(ts []DashboardInfoTile) []DashboardInfoTile {
+	out := make([]DashboardInfoTile, 0, len(ts))
+	for _, t := range ts {
+		if t.Replicate {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func priorityClassRank(value string) int {

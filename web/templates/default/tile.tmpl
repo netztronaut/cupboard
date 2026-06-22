@@ -1,0 +1,13 @@
+{{define "tile"}}
+<li class="tile">
+  {{if .URL}}
+  <a href="{{.URL}}" target="{{if .Target}}{{.Target}}{{else}}_self{{end}}" rel="noreferrer">
+  {{end}}
+    <strong>{{.Name}}</strong>
+    <div class="tile-content">{{.Content | safeHTML}}</div>
+  {{if .URL}}
+  </a>
+  {{end}}
+  {{if .Source}}<span class="source">{{.Source | safeHTML}}</span>{{end}}
+</li>
+{{end}}

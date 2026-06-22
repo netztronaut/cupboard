@@ -16,9 +16,19 @@ type DashboardLink = {
   source?: string
 }
 
+type DashboardInfoTile = {
+  name: string
+  icon?: string
+  url?: string
+  target?: string
+  source?: string
+  content?: string
+}
+
 type DashboardGroup = {
   name: string
   links: DashboardLink[]
+  tiles?: DashboardInfoTile[]
 }
 
 type DashboardResponse = {
@@ -303,6 +313,20 @@ function App() {
                     <span>{link.name}</span>
                   </a>
                   {link.source && <small>{link.source}</small>}
+                </li>
+              ))}
+              {(group.tiles ?? []).map((tile) => (
+                <li key={`${group.name}-tile-${tile.name}`} className="info-tile">
+                  {tile.url
+                    ? <a href={tile.url} target={tile.target || '_self'} rel="noreferrer"><span>{tile.name}</span></a>
+                    : <span>{tile.name}</span>
+                  }
+                  {tile.content && (
+                    // content is trusted HTML rendered by the operator's Processor template
+                    // eslint-disable-next-line react/no-danger
+                    <div dangerouslySetInnerHTML={{ __html: tile.content }} />
+                  )}
+                  {tile.source && <small dangerouslySetInnerHTML={{ __html: tile.source }} />}
                 </li>
               ))}
             </ul>
