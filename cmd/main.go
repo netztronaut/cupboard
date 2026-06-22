@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -31,12 +32,18 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"github.com/spf13/viper"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/discovery"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	toolscache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -393,6 +400,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	notifier := web.NewDashboardNotifier()
+	if err := mgr.Add(notifier); err != nil {
+		setupLog.Error(err, "Failed to add dashboard notifier")
+		os.Exit(1)
+	}
+	setupDashboardWatches(mgr, notifier, discoveryClient)
+
 	webHandler, err := web.NewHandler(mgr.GetClient(), discoveryClient, web.Options{
 		Auth: web.AuthOptions{
 			Enabled:             enableAuth,
@@ -414,7 +428,7 @@ func main() {
 			FaviconURL:    firstNonEmpty(config.GetString("page.faviconURL"), config.GetString("web.faviconURL")),
 			ContentLayout: firstNonEmpty(config.GetString("page.contentLayout"), config.GetString("web.contentLayout")),
 		},
-	})
+	}, notifier)
 	if err != nil {
 		setupLog.Error(err, "Failed to initialize embedded web interface")
 		os.Exit(1)
@@ -483,5 +497,56 @@ func main() {
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
+	}
+}
+
+// setupDashboardWatches registers cache informer event handlers so the notifier fires
+// whenever a resource that affects the dashboard changes. Must be called before mgr.Start().
+func setupDashboardWatches(mgr ctrl.Manager, notifier *web.DashboardNotifier, dc *discovery.DiscoveryClient) {
+	notify := toolscache.ResourceEventHandlerFuncs{
+		AddFunc:    func(_ interface{}) { notifier.Notify() },
+		UpdateFunc: func(_, _ interface{}) { notifier.Notify() },
+		DeleteFunc: func(_ interface{}) { notifier.Notify() },
+	}
+
+	addWatch := func(obj ctrlclient.Object) {
+		informer, err := mgr.GetCache().GetInformer(context.Background(), obj)
+		if err != nil {
+			setupLog.Error(err, "Failed to set up dashboard watch", "type", fmt.Sprintf("%T", obj))
+			return
+		}
+		if _, err := informer.AddEventHandler(notify); err != nil {
+			setupLog.Error(err, "Failed to add dashboard event handler", "type", fmt.Sprintf("%T", obj))
+		}
+	}
+
+	// Always-available resources.
+	addWatch(&dashboardv1alpha1.BookmarkGroup{})
+	addWatch(&networkingv1.Ingress{})
+	addWatch(&corev1.Service{})
+
+	resourceAvailable := func(groupVersion, kind string) bool {
+		list, err := dc.ServerResourcesForGroupVersion(groupVersion)
+		if err != nil {
+			return false
+		}
+		for _, r := range list.APIResources {
+			if r.Kind == kind {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Optional: ForecastleApp.
+	if resourceAvailable("forecastle.stakater.com/v1alpha1", "ForecastleApp") {
+		addWatch(&forecastlev1alpha1.ForecastleApp{})
+	}
+
+	// Optional: HTTPRoute (unstructured, CRD may not exist).
+	if resourceAvailable("gateway.networking.k8s.io/v1", "HTTPRoute") {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "HTTPRoute"})
+		addWatch(u)
 	}
 }

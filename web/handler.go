@@ -3,7 +3,6 @@ package web
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,98 +10,12 @@ import (
 	"net/http"
 	"path"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/gorilla/websocket"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type dashboardUpdateNotifier struct {
-	collector *dashboardCollector
-	mu        sync.Mutex
-	clients   map[*websocket.Conn]struct{}
-	upgrader  websocket.Upgrader
-}
 
-func newDashboardUpdateNotifier(collector *dashboardCollector) *dashboardUpdateNotifier {
-	return &dashboardUpdateNotifier{
-		collector: collector,
-		clients:   map[*websocket.Conn]struct{}{},
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		},
-	}
-}
-
-func (n *dashboardUpdateNotifier) start(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		lastSignature := ""
-		for {
-			select {
-			case <-ctx.Done():
-				n.closeAll()
-				return
-			case <-ticker.C:
-				signature := n.collectSignature(ctx)
-				if signature == "" || signature == lastSignature {
-					continue
-				}
-				lastSignature = signature
-				n.broadcastPing()
-			}
-		}
-	}()
-}
-
-func (n *dashboardUpdateNotifier) collectSignature(ctx context.Context) string {
-	payload, err := n.collector.collectDashboard(ctx, []string{allLinkGroupsWildcard})
-	if err != nil {
-		return ""
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(raw)
-	return fmt.Sprintf("%x", sum)
-}
-
-func (n *dashboardUpdateNotifier) register(conn *websocket.Conn) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.clients[conn] = struct{}{}
-}
-
-func (n *dashboardUpdateNotifier) unregister(conn *websocket.Conn) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	delete(n.clients, conn)
-}
-
-func (n *dashboardUpdateNotifier) closeAll() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	for conn := range n.clients {
-		delete(n.clients, conn)
-	}
-}
-
-func (n *dashboardUpdateNotifier) broadcastPing() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	for conn := range n.clients {
-		_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		if err := conn.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
-			_ = conn.Close()
-			delete(n.clients, conn)
-		}
-	}
-}
-
-func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options) (http.Handler, error) {
+func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier) (http.Handler, error) {
 	frontendFS, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, err
@@ -114,8 +27,6 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 	auth := newAuthService(options.Auth)
 	collector := newDashboardCollector(k8sClient, discovery, options)
 	collector.logMissingOptionalResources(context.Background())
-	notifier := newDashboardUpdateNotifier(collector)
-	notifier.start(context.Background())
 	pageTemplate, err := loadPageTemplate(options.Page.TemplateSet)
 	if err != nil {
 		return nil, err

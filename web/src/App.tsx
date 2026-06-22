@@ -56,6 +56,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [subject, setSubject] = useState<string>()
   const [authEnabled, setAuthEnabled] = useState(true)
+  const [wsEnabled, setWsEnabled] = useState(false)
 
   const fetchDashboard = async (token?: string) => {
     const response = await fetch('/api/dashboard', {
@@ -141,6 +142,7 @@ function App() {
         if (!authConfig.enabled) {
           setSubject('anonymous')
           await fetchDashboard()
+          setWsEnabled(true)
           return
         }
 
@@ -198,6 +200,58 @@ function App() {
       }
     })()
   }, [])
+
+  useEffect(() => {
+    if (!wsEnabled) return
+
+    let destroyed = false
+    let ws: WebSocket | null = null
+    let retryDelay = 1000
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+    const refetch = () => {
+      fetch('/api/dashboard', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data) setGroups((data as DashboardResponse).groups)
+        })
+        .catch(() => {})
+    }
+
+    const connect = (isReconnect: boolean) => {
+      if (destroyed) return
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      ws = new WebSocket(`${proto}//${window.location.host}/api/dashboard/updates`)
+
+      ws.onopen = () => {
+        retryDelay = 1000
+        if (isReconnect) refetch()
+      }
+
+      ws.onmessage = () => {
+        refetch()
+      }
+
+      ws.onerror = () => {
+        ws?.close()
+      }
+
+      ws.onclose = () => {
+        ws = null
+        if (destroyed) return
+        retryTimer = setTimeout(() => connect(true), retryDelay)
+        retryDelay = Math.min(retryDelay * 2, 30000)
+      }
+    }
+
+    connect(false)
+
+    return () => {
+      destroyed = true
+      if (retryTimer !== null) clearTimeout(retryTimer)
+      ws?.close()
+    }
+  }, [wsEnabled])
 
   const isImageIcon = (icon?: string) =>
     !!icon &&

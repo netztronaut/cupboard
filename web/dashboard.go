@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -56,6 +57,33 @@ const (
 
 	allLinkGroupsWildcard = "\x00all-link-groups"
 )
+
+type resourceMeta struct {
+	Group  string
+	Name   string
+	URL    string
+	Target string
+	Icon   string
+}
+
+func resourceMetaFrom(obj metav1.Object) resourceMeta {
+	ann := obj.GetAnnotations()
+	group := ann[annotationGroup]
+	if group == "" {
+		group = obj.GetNamespace()
+	}
+	name := ann[annotationName]
+	if name == "" {
+		name = obj.GetName()
+	}
+	return resourceMeta{
+		Group:  group,
+		Name:   name,
+		URL:    ann[annotationURL],
+		Target: defaultTarget(ann[annotationTarget]),
+		Icon:   firstNonEmpty(ann[annotationIcon], ann[annotationIconURL]),
+	}
+}
 
 type DashboardResponse struct {
 	LinkGroups []DashboardLinkGroup `json:"linkGroups"`
@@ -109,8 +137,24 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 			return DashboardResponse{}, err
 		}
 	}
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, "TLSRoute") {
+		if err := collectTLSRoutes(ctx, c.reader, groups, groupDetails); err != nil {
+			return DashboardResponse{}, err
+		}
+	}
 	if err := collectServices(ctx, c.reader, groups, groupDetails); err != nil {
 		return DashboardResponse{}, err
+	}
+	if err := collectEndpoints(ctx, c.reader, groups, groupDetails); err != nil {
+		return DashboardResponse{}, err
+	}
+	if err := collectEndpointSlices(ctx, c.reader, groups, groupDetails); err != nil {
+		return DashboardResponse{}, err
+	}
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "externaldns.k8s.io", Version: "v1alpha1"}, "DNSEndpoint") {
+		if err := collectDNSEndpoints(ctx, c.reader, groups, groupDetails); err != nil {
+			return DashboardResponse{}, err
+		}
 	}
 
 	orderedGroups := sortLinkGroups(groupDetails)
@@ -186,6 +230,8 @@ func (c *dashboardCollector) logMissingOptionalResources(ctx context.Context) {
 		{groupVersion: forecastlev1alpha1.GroupVersion, kind: "ForecastleApp"},
 		{groupVersion: schema.GroupVersion{Group: "networking.k8s.io", Version: "v1"}, kind: "Ingress"},
 		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, kind: "HTTPRoute"},
+		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, kind: "TLSRoute"},
+		{groupVersion: schema.GroupVersion{Group: "externaldns.k8s.io", Version: "v1alpha1"}, kind: "DNSEndpoint"},
 	} {
 		if !c.resourceAvailable(ctx, resource.groupVersion, resource.kind) {
 			setupLog.Info("Skipping optional dashboard resource because it is unavailable", "groupVersion", resource.groupVersion.String(), "kind", resource.kind)
@@ -332,26 +378,24 @@ func collectIngresses(ctx context.Context, c client.Reader, groups map[string][]
 		return err
 	}
 	for _, ing := range list.Items {
-		groupName := ing.GetAnnotations()[annotationGroup]
-		linkName := ing.GetAnnotations()[annotationName]
-		url := ing.GetAnnotations()[annotationURL]
-		if strings.TrimSpace(url) == "" {
+		meta := resourceMetaFrom(&ing)
+		if meta.URL == "" {
 			for _, rule := range ing.Spec.Rules {
 				if strings.TrimSpace(rule.Host) != "" {
-					url = "https://" + rule.Host
+					meta.URL = "https://" + rule.Host
 					break
 				}
 			}
 		}
-		if groupName == "" || linkName == "" || url == "" {
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
 			continue
 		}
-		ensureLinkGroup(groupDetails, groupName)
-		groups[groupName] = append(groups[groupName], DashboardLink{
-			Name:   linkName,
-			URL:    url,
-			Target: defaultTarget(ing.GetAnnotations()[annotationTarget]),
-			Icon:   firstNonEmpty(ing.GetAnnotations()[annotationIcon], ing.GetAnnotations()[annotationIconURL]),
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
 			Source: "ingress",
 		})
 	}
@@ -369,30 +413,64 @@ func collectHTTPRoutes(ctx context.Context, c client.Reader, groups map[string][
 		return client.IgnoreNotFound(err)
 	}
 	for _, route := range list.Items {
-		annotations := route.GetAnnotations()
-		groupName := annotations[annotationGroup]
-		linkName := annotations[annotationName]
-		url := annotations[annotationURL]
-		if strings.TrimSpace(url) == "" {
+		meta := resourceMetaFrom(&route)
+		if meta.URL == "" {
 			if hostnames, found, err := unstructured.NestedStringSlice(route.Object, "spec", "hostnames"); err == nil && found {
 				for _, host := range hostnames {
 					if strings.TrimSpace(host) != "" {
-						url = "https://" + host
+						meta.URL = "https://" + host
 						break
 					}
 				}
 			}
 		}
-		if groupName == "" || linkName == "" || url == "" {
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
 			continue
 		}
-		ensureLinkGroup(groupDetails, groupName)
-		groups[groupName] = append(groups[groupName], DashboardLink{
-			Name:   linkName,
-			URL:    url,
-			Target: defaultTarget(annotations[annotationTarget]),
-			Icon:   firstNonEmpty(annotations[annotationIcon], annotations[annotationIconURL]),
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
 			Source: "httproute",
+		})
+	}
+	return nil
+}
+
+func collectTLSRoutes(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "gateway.networking.k8s.io",
+		Version: "v1alpha2",
+		Kind:    "TLSRouteList",
+	})
+	if err := c.List(ctx, list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	for _, route := range list.Items {
+		meta := resourceMetaFrom(&route)
+		if meta.URL == "" {
+			if hostnames, found, err := unstructured.NestedStringSlice(route.Object, "spec", "hostnames"); err == nil && found {
+				for _, host := range hostnames {
+					if strings.TrimSpace(host) != "" {
+						meta.URL = "https://" + host
+						break
+					}
+				}
+			}
+		}
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
+			continue
+		}
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
+			Source: "tlsroute",
 		})
 	}
 	return nil
@@ -404,27 +482,109 @@ func collectServices(ctx context.Context, c client.Reader, groups map[string][]D
 		return err
 	}
 	for _, svc := range list.Items {
-		annotations := svc.GetAnnotations()
-		groupName := annotations[annotationGroup]
-		linkName := annotations[annotationName]
-		url := annotations[annotationURL]
-		if strings.TrimSpace(url) == "" && len(svc.Spec.Ports) > 0 {
+		meta := resourceMetaFrom(&svc)
+		if meta.URL == "" && len(svc.Spec.Ports) > 0 {
 			scheme := "http"
 			if svc.Spec.Ports[0].Port == 443 {
 				scheme = "https"
 			}
-			url = fmt.Sprintf("%s://%s.%s.svc.cluster.local:%d", scheme, svc.Name, svc.Namespace, svc.Spec.Ports[0].Port)
+			meta.URL = fmt.Sprintf("%s://%s.%s.svc.cluster.local:%d", scheme, svc.Name, svc.Namespace, svc.Spec.Ports[0].Port)
 		}
-		if groupName == "" || linkName == "" || url == "" {
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
 			continue
 		}
-		ensureLinkGroup(groupDetails, groupName)
-		groups[groupName] = append(groups[groupName], DashboardLink{
-			Name:   linkName,
-			URL:    url,
-			Target: defaultTarget(annotations[annotationTarget]),
-			Icon:   firstNonEmpty(annotations[annotationIcon], annotations[annotationIconURL]),
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
 			Source: "service",
+		})
+	}
+	return nil
+}
+
+func collectEndpoints(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
+	var list corev1.EndpointsList
+	if err := c.List(ctx, &list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
+		return err
+	}
+	for _, ep := range list.Items {
+		meta := resourceMetaFrom(&ep)
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
+			continue
+		}
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
+			Source: "endpoint",
+		})
+	}
+	return nil
+}
+
+func collectEndpointSlices(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
+	var list discoveryv1.EndpointSliceList
+	if err := c.List(ctx, &list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
+		return err
+	}
+	for _, eps := range list.Items {
+		meta := resourceMetaFrom(&eps)
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
+			continue
+		}
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
+			Source: "endpointslice",
+		})
+	}
+	return nil
+}
+
+func collectDNSEndpoints(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "externaldns.k8s.io",
+		Version: "v1alpha1",
+		Kind:    "DNSEndpointList",
+	})
+	if err := c.List(ctx, list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	for _, ep := range list.Items {
+		meta := resourceMetaFrom(&ep)
+		if meta.URL == "" {
+			if endpoints, found, err := unstructured.NestedSlice(ep.Object, "spec", "endpoints"); err == nil && found {
+				for _, item := range endpoints {
+					endpointMap, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					if dnsName, ok := endpointMap["dnsName"].(string); ok && strings.TrimSpace(dnsName) != "" {
+						meta.URL = "https://" + dnsName
+						break
+					}
+				}
+			}
+		}
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
+			continue
+		}
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
+			Source: "dnsendpoint",
 		})
 	}
 	return nil
