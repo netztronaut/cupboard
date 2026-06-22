@@ -178,19 +178,18 @@ function App() {
             return
           }
           resetAutoSignInFailures()
-          window.location.replace('/')
+          await fetchDashboard()
+          setWsEnabled(true)
           return
         }
 
-        if (!user) {
-          if (await loadBackendSessionSubject()) {
-            resetAutoSignInFailures()
-            window.location.replace('/')
-            return
-          }
-          await startAutomaticSignIn()
+        if (await loadBackendSessionSubject()) {
+          resetAutoSignInFailures()
+          await fetchDashboard()
+          setWsEnabled(true)
           return
         }
+        await startAutomaticSignIn()
 
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)

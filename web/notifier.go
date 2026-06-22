@@ -3,6 +3,8 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,7 +30,17 @@ func NewDashboardNotifier() *DashboardNotifier {
 		clients: make(map[*websocket.Conn]struct{}),
 		notify:  make(chan struct{}, 1),
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool { return true },
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				u, err := url.Parse(origin)
+				if err != nil {
+					return false
+				}
+				return strings.EqualFold(u.Host, r.Host)
+			},
 		},
 	}
 }
@@ -46,6 +58,8 @@ func (n *DashboardNotifier) Notify() {
 func (n *DashboardNotifier) Start(ctx context.Context) error {
 	limiter := time.NewTicker(time.Second)
 	defer limiter.Stop()
+	pinger := time.NewTicker(30 * time.Second)
+	defer pinger.Stop()
 	pending := false
 	for {
 		select {
@@ -65,6 +79,8 @@ func (n *DashboardNotifier) Start(ctx context.Context) error {
 			if hasClients {
 				n.broadcastPing()
 			}
+		case <-pinger.C:
+			n.broadcastWSPing()
 		}
 	}
 }
@@ -91,13 +107,33 @@ func (n *DashboardNotifier) closeAll() {
 }
 
 func (n *DashboardNotifier) broadcastPing() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	for conn := range n.clients {
+	snapshot := n.snapshot()
+	for _, conn := range snapshot {
 		_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 		if err := conn.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
 			_ = conn.Close()
-			delete(n.clients, conn)
+			n.unregister(conn)
 		}
 	}
+}
+
+func (n *DashboardNotifier) broadcastWSPing() {
+	snapshot := n.snapshot()
+	for _, conn := range snapshot {
+		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			_ = conn.Close()
+			n.unregister(conn)
+		}
+	}
+}
+
+func (n *DashboardNotifier) snapshot() []*websocket.Conn {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := make([]*websocket.Conn, 0, len(n.clients))
+	for conn := range n.clients {
+		out = append(out, conn)
+	}
+	return out
 }

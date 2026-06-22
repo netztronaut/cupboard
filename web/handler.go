@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -168,6 +169,10 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 				notifier.unregister(conn)
 				_ = conn.Close()
 			}()
+			_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
+			conn.SetPongHandler(func(_ string) error {
+				return conn.SetReadDeadline(time.Now().Add(70 * time.Second))
+			})
 			for {
 				if _, _, readErr := conn.ReadMessage(); readErr != nil {
 					return
