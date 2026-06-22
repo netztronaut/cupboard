@@ -15,7 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-
 func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier) (http.Handler, error) {
 	frontendFS, err := fs.Sub(distFS, "dist")
 	if err != nil {
