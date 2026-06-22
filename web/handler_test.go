@@ -21,239 +21,239 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestDashboardUpdateNotifier_Start(t *testing.T) {
-	collector := &dashboardCollector{}
-	notifier := newDashboardUpdateNotifier(collector)
+// dialTestNotifier starts a test HTTP server that upgrades connections and registers
+// them with the notifier. Returns the server and a client-side WS connection.
+func dialTestNotifier(t *testing.T, notifier *DashboardNotifier) (*httptest.Server, *websocket.Conn) {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		notifier.register(conn)
+		go func() {
+			defer notifier.unregister(conn)
+			for {
+				if _, _, readErr := conn.ReadMessage(); readErr != nil {
+					return
+				}
+			}
+		}()
+	}))
+	t.Cleanup(srv.Close)
 
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	return srv, conn
+}
+
+func TestDashboardNotifier_Start(t *testing.T) {
+	notifier := NewDashboardNotifier()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	notifier.start(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = notifier.Start(ctx)
+	}()
 
-	// Give it a moment to start
 	select {
 	case <-time.After(10 * time.Millisecond):
-		// Expected behavior - ticker started
-	case <-ctx.Done():
-		t.Fatal("Context cancelled unexpectedly")
+		// running as expected
+	case <-done:
+		t.Fatal("Start returned before context was cancelled")
 	}
 
-	// Stop by canceling context
 	cancel()
-}
-
-func TestDashboardUpdateNotifier_Register(t *testing.T) {
-	collector := &dashboardCollector{}
-	notifier := newDashboardUpdateNotifier(collector)
-
-	conn := &websocket.Conn{}
-	notifier.register(conn)
-
-	assert.Contains(t, notifier.clients, conn)
-}
-
-func TestDashboardUpdateNotifier_Unregister(t *testing.T) {
-	collector := &dashboardCollector{}
-	notifier := newDashboardUpdateNotifier(collector)
-
-	conn := &websocket.Conn{}
-	notifier.register(conn)
-	assert.Contains(t, notifier.clients, conn)
-
-	notifier.unregister(conn)
-	assert.NotContains(t, notifier.clients, conn)
-}
-
-func TestDashboardUpdateNotifier_CloseAll(t *testing.T) {
-	collector := &dashboardCollector{}
-	notifier := newDashboardUpdateNotifier(collector)
-
-	// Test that closeAll removes all clients
-	conn1 := &websocket.Conn{}
-	conn2 := &websocket.Conn{}
-	notifier.clients = map[*websocket.Conn]struct{}{
-		conn1: {},
-		conn2: {},
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Start did not return after context cancellation")
 	}
-
-	assert.Len(t, notifier.clients, 2)
-
-	// closeAll should clear the clients map
-	notifier.closeAll()
-	assert.Len(t, notifier.clients, 0)
 }
 
-func TestDashboardUpdateNotifier_BroadcastPing_NoClients(t *testing.T) {
-	collector := &dashboardCollector{}
-	notifier := newDashboardUpdateNotifier(collector)
+func TestDashboardNotifier_Notify(t *testing.T) {
+	notifier := NewDashboardNotifier()
 
-	// Should not panic with no clients
+	// Multiple Notify calls must not block.
+	for range 10 {
+		notifier.Notify()
+	}
+}
+
+func TestDashboardNotifier_Register(t *testing.T) {
+	notifier := NewDashboardNotifier()
+	_, _ = dialTestNotifier(t, notifier)
+
+	// Give the goroutine time to register.
+	time.Sleep(20 * time.Millisecond)
+	notifier.mu.Lock()
+	count := len(notifier.clients)
+	notifier.mu.Unlock()
+	assert.Equal(t, 1, count)
+}
+
+func TestDashboardNotifier_Unregister(t *testing.T) {
+	notifier := NewDashboardNotifier()
+	_, clientConn := dialTestNotifier(t, notifier)
+
+	time.Sleep(20 * time.Millisecond)
+	notifier.mu.Lock()
+	assert.Equal(t, 1, len(notifier.clients))
+	notifier.mu.Unlock()
+
+	_ = clientConn.Close()
+	time.Sleep(20 * time.Millisecond)
+	notifier.mu.Lock()
+	assert.Equal(t, 0, len(notifier.clients))
+	notifier.mu.Unlock()
+}
+
+func TestDashboardNotifier_CloseAll(t *testing.T) {
+	notifier := NewDashboardNotifier()
+	_, _ = dialTestNotifier(t, notifier)
+	_, _ = dialTestNotifier(t, notifier)
+
+	time.Sleep(20 * time.Millisecond)
+	notifier.mu.Lock()
+	assert.Equal(t, 2, len(notifier.clients))
+	notifier.mu.Unlock()
+
+	notifier.closeAll()
+	notifier.mu.Lock()
+	assert.Equal(t, 0, len(notifier.clients))
+	notifier.mu.Unlock()
+}
+
+func TestDashboardNotifier_BroadcastPing_NoClients(t *testing.T) {
+	notifier := NewDashboardNotifier()
+	// Must not panic with no clients.
 	notifier.broadcastPing()
 }
 
-func TestDashboardUpdateNotifier_Start_ContextCancelled(t *testing.T) {
-	collector := &dashboardCollector{}
-	notifier := newDashboardUpdateNotifier(collector)
-
+func TestDashboardNotifier_Start_ContextCancelled(t *testing.T) {
+	notifier := NewDashboardNotifier()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	notifier.start(ctx)
-	// Should exit gracefully when context is cancelled
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = notifier.Start(ctx)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Start did not return after pre-cancelled context")
+	}
 }
 
-func TestDashboardUpdateNotifier_Register_Multiple(t *testing.T) {
-	collector := &dashboardCollector{}
-	notifier := newDashboardUpdateNotifier(collector)
-
-	for i := 0; i < 5; i++ {
-		conn := &websocket.Conn{}
-		notifier.register(conn)
+func TestDashboardNotifier_Register_Multiple(t *testing.T) {
+	notifier := NewDashboardNotifier()
+	for range 5 {
+		_, _ = dialTestNotifier(t, notifier)
 	}
-
-	assert.Len(t, notifier.clients, 5)
+	time.Sleep(50 * time.Millisecond)
+	notifier.mu.Lock()
+	assert.Equal(t, 5, len(notifier.clients))
+	notifier.mu.Unlock()
 }
 
-func TestDashboardUpdateNotifier_Unregister_Multiple(t *testing.T) {
-	collector := &dashboardCollector{}
-	notifier := newDashboardUpdateNotifier(collector)
+func TestDashboardNotifier_NotifyBroadcast(t *testing.T) {
+	notifier := NewDashboardNotifier()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = notifier.Start(ctx) }()
 
-	var conns []*websocket.Conn
-	for i := 0; i < 5; i++ {
-		conn := &websocket.Conn{}
-		notifier.register(conn)
-		conns = append(conns, conn)
-	}
+	_, clientConn := dialTestNotifier(t, notifier)
+	time.Sleep(20 * time.Millisecond)
 
-	for _, conn := range conns {
-		notifier.unregister(conn)
-	}
+	notifier.Notify()
 
-	assert.Len(t, notifier.clients, 0)
+	_ = clientConn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, msg, err := clientConn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, "ping", string(msg))
 }
 
 func TestNewHandler_Success(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{}
-
-	handler, err := NewHandler(client, nil, options)
+	c := fake.NewClientBuilder().Build()
+	handler, err := NewHandler(c, nil, Options{}, NewDashboardNotifier())
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
 func TestNewHandler_EmptyOptions(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{}
-
-	handler, err := NewHandler(client, nil, options)
+	c := fake.NewClientBuilder().Build()
+	handler, err := NewHandler(c, nil, Options{}, NewDashboardNotifier())
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
 func TestNewHandler_WithAuth(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{
-		Auth: AuthOptions{
-			Enabled:      true,
-			CookieSecret: "test-secret",
-		},
-	}
-
-	handler, err := NewHandler(client, nil, options)
+	c := fake.NewClientBuilder().Build()
+	handler, err := NewHandler(c, nil, Options{
+		Auth: AuthOptions{Enabled: true, CookieSecret: "test-secret"},
+	}, NewDashboardNotifier())
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
 func TestNewHandler_WithLinkGroups(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{
-		LinkGroups: []LinkGroup{
-			{Name: "group1", Priority: 10},
-		},
-	}
-
-	handler, err := NewHandler(client, nil, options)
+	c := fake.NewClientBuilder().Build()
+	handler, err := NewHandler(c, nil, Options{
+		LinkGroups: []LinkGroup{{Name: "group1", Priority: 10}},
+	}, NewDashboardNotifier())
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
 func TestNewHandler_WithStaticLinks(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{
-		StaticLinks: []StaticLink{
-			{Name: "link1", URL: "https://example.com"},
-		},
-	}
-
-	handler, err := NewHandler(client, nil, options)
+	c := fake.NewClientBuilder().Build()
+	handler, err := NewHandler(c, nil, Options{
+		StaticLinks: []StaticLink{{Name: "link1", URL: "https://example.com"}},
+	}, NewDashboardNotifier())
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
 func TestNewHandler_WithPageOptions(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{
-		Page: PageOptions{
-			Title:         "Test Title",
-			FaviconURL:    "/favicon.ico",
-			ContentLayout: "grid",
-		},
-	}
-
-	handler, err := NewHandler(client, nil, options)
+	c := fake.NewClientBuilder().Build()
+	handler, err := NewHandler(c, nil, Options{
+		Page: PageOptions{Title: "Test Title", FaviconURL: "/favicon.ico", ContentLayout: "grid"},
+	}, NewDashboardNotifier())
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
 func TestNewHandler_WithForecastleOptions(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{
-		Forecastle: ForecastleOptions{
-			Instance: "test-instance",
-		},
-	}
-
-	handler, err := NewHandler(client, nil, options)
+	c := fake.NewClientBuilder().Build()
+	handler, err := NewHandler(c, nil, Options{
+		Forecastle: ForecastleOptions{Instance: "test-instance"},
+	}, NewDashboardNotifier())
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
-func TestNewHandler_FrontendFSError(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{}
-
-	// This should fail because distFS doesn't have the expected structure
-	_, err := NewHandler(client, nil, options)
-	// May error depending on distFS content
-	assert.NoError(t, err)
-}
-
-func TestNewHandler_StaticFSError(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{}
-
-	_, err := NewHandler(client, nil, options)
-	assert.NoError(t, err)
-}
-
 func TestNewHandler_PageTemplateError(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	options := Options{
-		Page: PageOptions{
-			TemplateSet: "nonexistent",
-		},
-	}
-
-	// The implementation falls back to default templates when a set doesn't exist
-	handler, err := NewHandler(client, nil, options)
+	c := fake.NewClientBuilder().Build()
+	handler, err := NewHandler(c, nil, Options{
+		Page: PageOptions{TemplateSet: "nonexistent"},
+	}, NewDashboardNotifier())
 	assert.NoError(t, err)
 	assert.NotNil(t, handler)
 }
@@ -296,146 +296,97 @@ func TestReadRootAsset_BackslashPath(t *testing.T) {
 
 func TestInjectAuthConfig_Success(t *testing.T) {
 	html := []byte(`<html><head></head><body>Test</body></html>`)
-	config := authConfigResponse{Enabled: true}
-
-	result, err := injectAuthConfig(html, config)
+	result, err := injectAuthConfig(html, authConfigResponse{Enabled: true})
 	assert.NoError(t, err)
 	assert.Contains(t, string(result), "window.config")
 }
 
 func TestInjectAuthConfig_MissingHeadTag(t *testing.T) {
 	html := []byte(`<html><body>Test</body></html>`)
-	config := authConfigResponse{Enabled: true}
-
-	result, err := injectAuthConfig(html, config)
+	result, err := injectAuthConfig(html, authConfigResponse{Enabled: true})
 	assert.Error(t, err)
 	assert.Nil(t, result)
 }
 
 func TestInjectAuthConfig_InvalidConfig(t *testing.T) {
-	// Create an invalid config that will fail JSON marshaling
 	type invalidConfig struct {
 		Func func() `json:"func"`
 	}
-	inv := invalidConfig{Func: func() {}}
-
-	_, err := json.Marshal(inv)
+	_, err := json.Marshal(invalidConfig{Func: func() {}})
 	assert.Error(t, err)
-
-	// The injectAuthConfig should handle JSON marshaling errors
 }
 
 func TestInjectAuthConfig_EmptyHTML(t *testing.T) {
-	config := authConfigResponse{Enabled: true}
-
-	_, err := injectAuthConfig([]byte(``), config)
+	_, err := injectAuthConfig([]byte(``), authConfigResponse{Enabled: true})
 	assert.Error(t, err)
 }
 
 func TestInjectAuthConfig_NoHeadCloseTag(t *testing.T) {
-	html := []byte(`<html><head>`)
-	config := authConfigResponse{Enabled: true}
-
-	result, err := injectAuthConfig(html, config)
+	result, err := injectAuthConfig([]byte(`<html><head>`), authConfigResponse{Enabled: true})
 	assert.Error(t, err)
 	assert.Nil(t, result)
 }
 
 func TestInjectAuthConfig_MultipleHeadTags(t *testing.T) {
 	html := []byte(`<html><head></head><body>Test</body><head></head></html>`)
-	config := authConfigResponse{Enabled: true}
-
-	_, err := injectAuthConfig(html, config)
+	_, err := injectAuthConfig(html, authConfigResponse{Enabled: true})
 	assert.NoError(t, err)
-	// Should only replace the first </head>
 }
 
 func TestInjectAuthConfig_WithScript(t *testing.T) {
 	html := []byte(`<html><head><script>existing</script></head><body>Test</body></html>`)
-	config := authConfigResponse{Enabled: false}
-
-	result, err := injectAuthConfig(html, config)
+	result, err := injectAuthConfig(html, authConfigResponse{Enabled: false})
 	assert.NoError(t, err)
 	assert.Contains(t, string(result), "window.config")
 }
 
 func TestInjectAuthConfig_UnicodeCharacters(t *testing.T) {
 	html := []byte(`<html><head></head><body>日本語</body></html>`)
-	config := authConfigResponse{Enabled: true}
-
-	result, err := injectAuthConfig(html, config)
+	result, err := injectAuthConfig(html, authConfigResponse{Enabled: true})
 	assert.NoError(t, err)
 	assert.Contains(t, string(result), "日本語")
 }
 
-func TestInjectAuthConfig_SpecialCharactersInHTML(t *testing.T) {
-	html := []byte(`<html><head></head><body><script>alert('test')</script></body></html>`)
-	config := authConfigResponse{Enabled: true}
-
-	result, err := injectAuthConfig(html, config)
-	assert.NoError(t, err)
-	assert.Contains(t, string(result), "window.config")
-}
-
 func TestInjectAuthConfig_LongHTML(t *testing.T) {
 	html := []byte(`<html><head></head><body>`)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		html = append(html, []byte("Test content ")...)
 	}
 	html = append(html, []byte("</body></html>")...)
-	config := authConfigResponse{Enabled: true}
-
-	result, err := injectAuthConfig(html, config)
+	result, err := injectAuthConfig(html, authConfigResponse{Enabled: true})
 	assert.NoError(t, err)
 	assert.Contains(t, string(result), "window.config")
 }
 
 func TestRequireAuthentication_Enabled(t *testing.T) {
 	auth := newAuthService(AuthOptions{Enabled: true, CookieSecret: "test-secret"})
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-
-	requireAuth := requireAuthentication(auth, handler)
-
 	req := httptest.NewRequest("GET", "/test", nil)
 	rec := httptest.NewRecorder()
-
-	requireAuth.ServeHTTP(rec, req)
-
-	// Should return unauthorized because no auth session
+	requireAuthentication(auth, handler).ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestRequireAuthentication_Disabled(t *testing.T) {
 	auth := newAuthService(AuthOptions{Enabled: false})
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-
-	requireAuth := requireAuthentication(auth, handler)
-
 	req := httptest.NewRequest("GET", "/test", nil)
 	rec := httptest.NewRecorder()
-
-	requireAuth.ServeHTTP(rec, req)
-
-	// Should return OK because auth is disabled
+	requireAuthentication(auth, handler).ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestOpenAPISpec(t *testing.T) {
 	spec := openAPISpec()
-
 	assert.Equal(t, "3.0.3", spec["openapi"])
 	assert.Equal(t, "cupboard API", spec["info"].(map[string]interface{})["title"])
-
 	securitySchemes := spec["components"].(map[string]interface{})["securitySchemes"].(map[string]interface{})
 	assert.Equal(t, "http", securitySchemes["bearerAuth"].(map[string]interface{})["type"])
 	assert.Equal(t, "bearer", securitySchemes["bearerAuth"].(map[string]interface{})["scheme"])
-
 	paths := spec["paths"].(map[string]interface{})
 	assert.Contains(t, paths, "/api/session")
 	assert.Contains(t, paths, "/api/dashboard")
@@ -443,33 +394,25 @@ func TestOpenAPISpec(t *testing.T) {
 
 func TestOpenAPISpec_SessionEndpoint(t *testing.T) {
 	spec := openAPISpec()
-	paths := spec["paths"].(map[string]interface{})
-	sessionPath := paths["/api/session"].(map[string]interface{})
-
+	sessionPath := spec["paths"].(map[string]interface{})["/api/session"].(map[string]interface{})
 	assert.Contains(t, sessionPath, "get")
 	assert.Contains(t, sessionPath, "post")
 	assert.Contains(t, sessionPath, "delete")
-
 	getOp := sessionPath["get"].(map[string]interface{})
 	assert.Equal(t, "Get session userinfo from cookie", getOp["summary"])
 }
 
 func TestOpenAPISpec_DashboardEndpoint(t *testing.T) {
 	spec := openAPISpec()
-	paths := spec["paths"].(map[string]interface{})
-	dashboardPath := paths["/api/dashboard"].(map[string]interface{})
-
+	dashboardPath := spec["paths"].(map[string]interface{})["/api/dashboard"].(map[string]interface{})
 	assert.Contains(t, dashboardPath, "get")
-
 	getOp := dashboardPath["get"].(map[string]interface{})
 	assert.Equal(t, "Get grouped dashboard links", getOp["summary"])
 }
 
 func TestOpenAPISpec_SecurityScheme(t *testing.T) {
 	spec := openAPISpec()
-	components := spec["components"].(map[string]interface{})
-	securitySchemes := components["securitySchemes"].(map[string]interface{})
-
+	securitySchemes := spec["components"].(map[string]interface{})["securitySchemes"].(map[string]interface{})
 	assert.Contains(t, securitySchemes, "bearerAuth")
 	bearerAuth := securitySchemes["bearerAuth"].(map[string]interface{})
 	assert.Equal(t, "http", bearerAuth["type"])
@@ -478,7 +421,6 @@ func TestOpenAPISpec_SecurityScheme(t *testing.T) {
 
 func TestOpenAPISpec_PathStructure(t *testing.T) {
 	spec := openAPISpec()
-
 	assert.IsType(t, map[string]interface{}{}, spec)
 	assert.Contains(t, spec, "openapi")
 	assert.Contains(t, spec, "info")
@@ -489,41 +431,30 @@ func TestOpenAPISpec_PathStructure(t *testing.T) {
 func TestOpenAPISpec_InfoStructure(t *testing.T) {
 	spec := openAPISpec()
 	info := spec["info"].(map[string]interface{})
-
 	assert.Equal(t, "cupboard API", info["title"])
 	assert.Equal(t, "v1", info["version"])
 }
 
 func TestOpenAPISpec_SecuritySchemesStructure(t *testing.T) {
 	spec := openAPISpec()
-	components := spec["components"].(map[string]interface{})
-	securitySchemes := components["securitySchemes"].(map[string]interface{})
-
+	securitySchemes := spec["components"].(map[string]interface{})["securitySchemes"].(map[string]interface{})
 	assert.IsType(t, map[string]interface{}{}, securitySchemes)
 }
 
 func TestOpenAPISpec_DashboardSecurity(t *testing.T) {
 	spec := openAPISpec()
-	paths := spec["paths"].(map[string]interface{})
-	dashboardPath := paths["/api/dashboard"].(map[string]interface{})
-
+	dashboardPath := spec["paths"].(map[string]interface{})["/api/dashboard"].(map[string]interface{})
 	getOp := dashboardPath["get"].(map[string]interface{})
 	security := getOp["security"].([]map[string]interface{})
-
 	assert.Len(t, security, 1)
-	securityEntry := security[0]
-	assert.Contains(t, securityEntry, "bearerAuth")
+	assert.Contains(t, security[0], "bearerAuth")
 }
 
 func TestOpenAPISpec_SessionSecurity(t *testing.T) {
 	spec := openAPISpec()
-	paths := spec["paths"].(map[string]interface{})
-	sessionPath := paths["/api/session"].(map[string]interface{})
-
+	sessionPath := spec["paths"].(map[string]interface{})["/api/session"].(map[string]interface{})
 	postOp := sessionPath["post"].(map[string]interface{})
 	security := postOp["security"].([]map[string]interface{})
-
 	assert.Len(t, security, 1)
-	securityEntry := security[0]
-	assert.Contains(t, securityEntry, "bearerAuth")
+	assert.Contains(t, security[0], "bearerAuth")
 }
