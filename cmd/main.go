@@ -33,6 +33,7 @@ import (
 
 	"github.com/spf13/viper"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -119,6 +120,7 @@ func loadViperConfig(configFile string) (*viper.Viper, error) {
 	_ = v.BindEnv("auth.enabled", "ENABLE_AUTH")
 	_ = v.BindEnv("auth.cookieSecret", "CUPBOARD_COOKIE_SECRET")
 	_ = v.BindEnv("auth.issuerURL", "OIDC_ISSUER_URL")
+	_ = v.BindEnv("auth.skipProbe", "SKIP_OIDC_PROBE")
 	_ = v.BindEnv("auth.clientID", "OIDC_CLIENT_ID")
 	_ = v.BindEnv("auth.redirectPath", "OIDC_REDIRECT_PATH")
 	_ = v.BindEnv("auth.scopes", "OIDC_SCOPES")
@@ -207,6 +209,7 @@ func main() {
 	var enableHTTP2 bool
 	var configFile string
 	enableAuth := true
+	skipOIDCProbe := false
 	var tlsOpts []func(*tls.Config)
 	var syncAddr string
 	var syncURLsFlag string
@@ -236,6 +239,8 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.BoolVar(&enableAuth, "enable-auth", enableAuth,
 		"If set, API authentication is enabled. Can also be controlled via ENABLE_AUTH env var.")
+	flag.BoolVar(&skipOIDCProbe, "skip-oidc-probe", skipOIDCProbe,
+		"If set, the startup probe of the OIDC well-known endpoint is skipped. Can also be controlled via SKIP_OIDC_PROBE env var.")
 	flag.StringVar(&forecastleInstance, "forecastle-instance", "",
 		"Forecastle instance name used to filter ForecastleApp resources by spec.instance. Can also be controlled via CUPBOARD_FORECASTLE_INSTANCE env var.")
 	flag.StringVar(&configFile, "config", "", "Path to the cupboard configuration file (yaml/json/toml). Can also be set via CUPBOARD_CONFIG.")
@@ -273,6 +278,7 @@ func main() {
 	metricsCertKey = resolveStringFlag(config, setFlags, "metrics-cert-key", "metrics.cert.key", metricsCertKey)
 	enableHTTP2 = resolveBoolFlag(config, setFlags, "enable-http2", "http2.enabled", enableHTTP2)
 	enableAuth = resolveBoolFlag(config, setFlags, "enable-auth", "auth.enabled", enableAuth)
+	skipOIDCProbe = resolveBoolFlag(config, setFlags, "skip-oidc-probe", "auth.skipProbe", skipOIDCProbe)
 	forecastleInstance = resolveStringFlag(config, setFlags, "forecastle-instance", "forecastle.instance", forecastleInstance)
 	syncAddr = resolveStringFlag(config, setFlags, "sync-bind-address", "sync.bindAddress", syncAddr)
 	syncTLSCA = resolveStringFlag(config, setFlags, "sync-tls-ca", "sync.tls.ca", syncTLSCA)
@@ -484,6 +490,30 @@ func main() {
 		}
 	}
 
+	if issuerURL := config.GetString("auth.issuerURL"); issuerURL != "" {
+		wellKnownURL := strings.TrimRight(issuerURL, "/") + "/.well-known/openid-configuration"
+		if skipOIDCProbe {
+			setupLog.Info("Skipping OIDC well-known endpoint probe", "url", wellKnownURL)
+		} else {
+			setupLog.Info("Probing OIDC well-known endpoint until reachable", "url", wellKnownURL)
+			httpClient := &http.Client{Timeout: 5 * time.Second}
+			for {
+				resp, probeErr := httpClient.Get(wellKnownURL) //nolint:noctx
+				if probeErr == nil {
+					_ = resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						setupLog.Info("OIDC well-known endpoint is reachable")
+						break
+					}
+					setupLog.Info("OIDC well-known endpoint not ready", "status", resp.StatusCode)
+				} else {
+					setupLog.Info("OIDC well-known endpoint not reachable, retrying in 5s", "error", probeErr.Error())
+				}
+				time.Sleep(5 * time.Second)
+			}
+		}
+	}
+
 	webHandler, err := web.NewHandler(mgr.GetClient(), discoveryClient, web.Options{
 		Auth: web.AuthOptions{
 			Enabled:             enableAuth,
@@ -665,4 +695,41 @@ func setupDashboardWatches(mgr ctrl.Manager, notifier *web.DashboardNotifier, dc
 		u.SetGroupVersionKind(schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "HTTPRoute"})
 		addWatch(u)
 	}
+
+	// Optional: TLSRoute (unstructured, CRD may not exist).
+	if resourceAvailable("gateway.networking.k8s.io/v1alpha2", "TLSRoute") {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1alpha2", Kind: "TLSRoute"})
+		addWatch(u)
+	}
+
+	// Optional: TCPRoute (unstructured, CRD may not exist).
+	if resourceAvailable("gateway.networking.k8s.io/v1alpha2", "TCPRoute") {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1alpha2", Kind: "TCPRoute"})
+		addWatch(u)
+	}
+
+	// Optional: Traefik IngressRoute (prefer traefik.io, fall back to legacy traefik.containo.us).
+	for _, gvk := range []schema.GroupVersionKind{
+		{Group: "traefik.io", Version: "v1alpha1", Kind: "IngressRoute"},
+		{Group: "traefik.containo.us", Version: "v1alpha1", Kind: "IngressRoute"},
+	} {
+		if resourceAvailable(gvk.Group+"/"+gvk.Version, gvk.Kind) {
+			u := &unstructured.Unstructured{}
+			u.SetGroupVersionKind(gvk)
+			addWatch(u)
+			break
+		}
+	}
+
+	// Optional: ExternalDNS DNSEndpoint.
+	if resourceAvailable("externaldns.k8s.io/v1alpha1", "DNSEndpoint") {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(schema.GroupVersionKind{Group: "externaldns.k8s.io", Version: "v1alpha1", Kind: "DNSEndpoint"})
+		addWatch(u)
+	}
+
+	// Always-available: EndpointSlice.
+	addWatch(&discoveryv1.EndpointSlice{})
 }

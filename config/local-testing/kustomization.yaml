@@ -46,12 +46,14 @@ patches:
             value: "true"
           - name: ENABLE_AUTH
             value: "true"
+          - name: SKIP_OIDC_PROBE
+            value: "true"
           - name: CUPBOARD_CONFIG
             value: /etc/cupboard/cupboard.yaml
           - name: CUPBOARD_COOKIE_SECRET
             value: local-testing-cookie-secret-change-me
           - name: OIDC_ISSUER_URL
-            value: http://auth.localhost:8080/application/o/cupboard/
+            value: http://auth.localhost/application/o/cupboard/
           - name: OIDC_CLIENT_ID
             value: cupboard-local
           - name: OIDC_REDIRECT_PATH

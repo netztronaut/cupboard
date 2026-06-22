@@ -149,10 +149,23 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 			return DashboardResponse{}, err
 		}
 	}
-	if err := collectServices(ctx, c.reader, groups, groupDetails); err != nil {
-		return DashboardResponse{}, err
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, "TCPRoute") {
+		if err := collectTCPRoutes(ctx, c.reader, groups, groupDetails); err != nil {
+			return DashboardResponse{}, err
+		}
 	}
-	if err := collectEndpoints(ctx, c.reader, groups, groupDetails); err != nil {
+	for _, traefikGV := range []schema.GroupVersion{
+		{Group: "traefik.io", Version: "v1alpha1"},
+		{Group: "traefik.containo.us", Version: "v1alpha1"},
+	} {
+		if c.resourceAvailable(ctx, traefikGV, "IngressRoute") {
+			if err := collectIngressRoutes(ctx, c.reader, traefikGV, groups, groupDetails); err != nil {
+				return DashboardResponse{}, err
+			}
+			break
+		}
+	}
+	if err := collectServices(ctx, c.reader, groups, groupDetails); err != nil {
 		return DashboardResponse{}, err
 	}
 	if err := collectEndpointSlices(ctx, c.reader, groups, groupDetails); err != nil {
@@ -529,6 +542,89 @@ func collectTLSRoutes(ctx context.Context, c client.Reader, groups map[string][]
 	return nil
 }
 
+func collectTCPRoutes(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "gateway.networking.k8s.io",
+		Version: "v1alpha2",
+		Kind:    "TCPRouteList",
+	})
+	if err := c.List(ctx, list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	for _, route := range list.Items {
+		meta := resourceMetaFrom(&route)
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
+			continue
+		}
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
+			Source: "tcproute",
+		})
+	}
+	return nil
+}
+
+func collectIngressRoutes(ctx context.Context, c client.Reader, gv schema.GroupVersion, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   gv.Group,
+		Version: gv.Version,
+		Kind:    "IngressRouteList",
+	})
+	if err := c.List(ctx, list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	for _, route := range list.Items {
+		meta := resourceMetaFrom(&route)
+		if meta.URL == "" {
+			routes, found, _ := unstructured.NestedSlice(route.Object, "spec", "routes")
+			if found {
+				for _, r := range routes {
+					routeMap, ok := r.(map[string]any)
+					if !ok {
+						continue
+					}
+					match, _ := routeMap["match"].(string)
+					if host := extractHostFromTraefikMatch(match); host != "" {
+						meta.URL = "https://" + host
+						break
+					}
+				}
+			}
+		}
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
+			continue
+		}
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:   meta.Name,
+			URL:    meta.URL,
+			Target: meta.Target,
+			Icon:   meta.Icon,
+			Source: "ingressroute",
+		})
+	}
+	return nil
+}
+
+func extractHostFromTraefikMatch(match string) string {
+	start := strings.Index(match, "Host(`")
+	if start < 0 {
+		return ""
+	}
+	start += len("Host(`")
+	end := strings.Index(match[start:], "`)")
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(match[start : start+end])
+}
+
 func collectServices(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
 	var list corev1.ServiceList
 	if err := c.List(ctx, &list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
@@ -553,28 +649,6 @@ func collectServices(ctx context.Context, c client.Reader, groups map[string][]D
 			Target: meta.Target,
 			Icon:   meta.Icon,
 			Source: "service",
-		})
-	}
-	return nil
-}
-
-func collectEndpoints(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
-	var list corev1.EndpointsList
-	if err := c.List(ctx, &list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
-		return err
-	}
-	for _, ep := range list.Items {
-		meta := resourceMetaFrom(&ep)
-		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
-			continue
-		}
-		ensureLinkGroup(groupDetails, meta.Group)
-		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
-			Name:   meta.Name,
-			URL:    meta.URL,
-			Target: meta.Target,
-			Icon:   meta.Icon,
-			Source: "endpoint",
 		})
 	}
 	return nil

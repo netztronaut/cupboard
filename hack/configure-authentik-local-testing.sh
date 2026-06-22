@@ -4,8 +4,8 @@ set -euo pipefail
 NAMESPACE=${1:-authentik}
 APP_SLUG=${2:-cupboard}
 CLIENT_ID=${3:-cupboard-local}
-REDIRECT_URI=${4:-http://cupboard.localhost:8080/auth/callback}
-LAUNCH_URL=${5:-http://cupboard.localhost:8080/}
+REDIRECT_URI=${4:-http://cupboard.localhost/auth/callback}
+LAUNCH_URL=${5:-http://cupboard.localhost/}
 DEMO_USER=${6:-cupboard-admin}
 DEMO_PASSWORD=${7:-cupboard-admin}
 KUBECTL_CMD=("${KUBECTL:-kubectl}")
@@ -17,6 +17,21 @@ if ! "${KUBECTL_CMD[@]}" get deployment authentik-server -n "$NAMESPACE" >/dev/n
   echo "Authentik deployment not found in namespace '$NAMESPACE'; skipping OIDC bootstrap"
   exit 0
 fi
+
+echo "Waiting for Authentik bootstrap to complete (default flows must exist)..."
+BOOTSTRAP_TIMEOUT=300
+BOOTSTRAP_ELAPSED=0
+until "${KUBECTL_CMD[@]}" exec -n "$NAMESPACE" deployment/authentik-server -- \
+    ak shell -c "from authentik.flows.models import Flow; Flow.objects.get(slug='default-provider-authorization-implicit-consent')" \
+    >/dev/null 2>&1; do
+  if [[ $BOOTSTRAP_ELAPSED -ge $BOOTSTRAP_TIMEOUT ]]; then
+    echo "Timed out waiting for Authentik bootstrap after ${BOOTSTRAP_TIMEOUT}s"
+    exit 1
+  fi
+  echo "  Authentik bootstrap not ready yet, retrying in 10s..."
+  sleep 10
+  BOOTSTRAP_ELAPSED=$((BOOTSTRAP_ELAPSED + 10))
+done
 
 echo "Configuring Authentik OIDC application for local testing..."
 "${KUBECTL_CMD[@]}" exec -n "$NAMESPACE" deployment/authentik-server -i -- ak shell <<PY

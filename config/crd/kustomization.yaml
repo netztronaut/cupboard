@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/dashboard.netztronaut.de_bookmarkgroups.yaml
+- bases/dashboard.netztronaut.de_bookmarks.yaml
 - bases/forecastle.stakater.com_forecastleapps.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 

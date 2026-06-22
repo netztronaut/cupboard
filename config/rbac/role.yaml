@@ -21,6 +21,22 @@ rules:
   - list
   - watch
 - apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - externaldns.k8s.io
+  resources:
+  - dnsendpoints
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - forecastle.stakater.com
   resources:
   - forecastleapps
@@ -32,6 +48,8 @@ rules:
   - gateway.networking.k8s.io
   resources:
   - httproutes
+  - tcproutes
+  - tlsroutes
   verbs:
   - get
   - list
