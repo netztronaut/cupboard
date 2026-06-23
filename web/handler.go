@@ -59,13 +59,7 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
-		favicon, err := readRootAsset(frontendFS, "favicon.ico")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "image/x-icon")
-		_, _ = w.Write(favicon)
+		http.Redirect(w, r, "/static/logo.svg", http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
