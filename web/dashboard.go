@@ -437,7 +437,7 @@ func (c *dashboardCollector) logMissingOptionalResources(ctx context.Context) {
 	}
 }
 
-func (c *dashboardCollector) resourceAvailable(ctx context.Context, groupVersion schema.GroupVersion, kind string) bool {
+func (c *dashboardCollector) resourceAvailable(ctx context.Context, groupVersion schema.GroupVersion, kind string) bool { //nolint:unparam
 	if c.discovery == nil {
 		return false
 	}

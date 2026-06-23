@@ -129,7 +129,7 @@ func (r *InfoTileReconciler) renderContent(ctx context.Context, tile *dashboardv
 	return buf.String(), nil
 }
 
-func (r *InfoTileReconciler) doHTTPRequest(ctx context.Context, req *dashboardv1alpha1.InfoTileHTTPRequest) (int, string, interface{}, error) {
+func (r *InfoTileReconciler) doHTTPRequest(ctx context.Context, req *dashboardv1alpha1.InfoTileHTTPRequest) (int, string, any, error) {
 	method := strings.ToUpper(req.Method)
 	if method == "" {
 		method = http.MethodGet
@@ -179,7 +179,7 @@ func (r *InfoTileReconciler) doHTTPRequest(ctx context.Context, req *dashboardv1
 	}
 
 	body := string(rawBody)
-	var data interface{}
+	var data any
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "application/json") {
 		if err := json.Unmarshal(rawBody, &data); err != nil {
@@ -199,7 +199,7 @@ type processorContext struct {
 type processorResponse struct {
 	Code int
 	Body string
-	Data interface{}
+	Data any
 }
 
 func (r *InfoTileReconciler) SetupWithManager(mgr ctrl.Manager) error {

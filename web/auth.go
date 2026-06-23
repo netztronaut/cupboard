@@ -498,4 +498,3 @@ func requestBaseURL(r *http.Request) string {
 	}
 	return scheme + "://" + host
 }
-
