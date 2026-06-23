@@ -28,14 +28,14 @@ const (
 type authContextKey struct{}
 
 type sessionPayload struct {
-	ExpiresAt int64                  `json:"expiresAt"`
+	ExpiresAt int64          `json:"expiresAt"`
 	UserInfo  map[string]any `json:"userInfo"`
-	Groups    []string               `json:"groups,omitempty"`
+	Groups    []string       `json:"groups,omitempty"`
 }
 
 type authSession struct {
 	UserInfo map[string]any `json:"userInfo"`
-	Groups   []string               `json:"groups,omitempty"`
+	Groups   []string       `json:"groups,omitempty"`
 }
 
 type authService struct {
