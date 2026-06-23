@@ -155,7 +155,7 @@ func (v *BookmarkGroupCustomValidator) ensureReachable(ctx context.Context, rawU
 			return err
 		}
 	}
-	defer res.Body.Close()
+	defer res.Body.Close() //nolint:errcheck
 	if res.StatusCode >= http.StatusBadRequest {
 		return fmt.Errorf("url returned status %d", res.StatusCode)
 	}

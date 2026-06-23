@@ -32,7 +32,7 @@ func (h *Handler) NewSyncHandler() http.Handler {
 	return newSyncHandler(h.collector)
 }
 
-func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier, syncClient *SyncClient) (*Handler, error) {
+func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier, syncClient *SyncClient) (*Handler, error) { //nolint:gocyclo
 	frontendFS, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, err
@@ -105,8 +105,8 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
 		if !auth.enabled {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"userInfo": map[string]interface{}{"sub": "anonymous"},
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"userInfo": map[string]any{"sub": "anonymous"},
 				"groups":   []string{},
 			})
 			return
@@ -315,38 +315,38 @@ func requireAuthentication(auth *authService, next http.Handler) http.Handler {
 	})
 }
 
-func openAPISpec() map[string]interface{} {
-	return map[string]interface{}{
+func openAPISpec() map[string]any {
+	return map[string]any{
 		"openapi": "3.0.3",
-		"info": map[string]interface{}{
+		"info": map[string]any{
 			"title":   "cupboard API",
 			"version": "v1",
 		},
-		"components": map[string]interface{}{
-			"securitySchemes": map[string]interface{}{
-				"bearerAuth": map[string]interface{}{
+		"components": map[string]any{
+			"securitySchemes": map[string]any{
+				"bearerAuth": map[string]any{
 					"type":   "http",
 					"scheme": "bearer",
 				},
 			},
 		},
-		"paths": map[string]interface{}{
-			"/api/session": map[string]interface{}{
-				"get": map[string]interface{}{
+		"paths": map[string]any{
+			"/api/session": map[string]any{
+				"get": map[string]any{
 					"summary": "Get session userinfo from cookie",
 				},
-				"post": map[string]interface{}{
+				"post": map[string]any{
 					"summary":  "Create backend session from bearer token",
-					"security": []map[string]interface{}{{"bearerAuth": []string{}}},
+					"security": []map[string]any{{"bearerAuth": []string{}}},
 				},
-				"delete": map[string]interface{}{
+				"delete": map[string]any{
 					"summary": "Clear backend session cookie",
 				},
 			},
-			"/api/dashboard": map[string]interface{}{
-				"get": map[string]interface{}{
+			"/api/dashboard": map[string]any{
+				"get": map[string]any{
 					"summary":  "Get grouped dashboard links",
-					"security": []map[string]interface{}{{"bearerAuth": []string{}}},
+					"security": []map[string]any{{"bearerAuth": []string{}}},
 				},
 			},
 		},

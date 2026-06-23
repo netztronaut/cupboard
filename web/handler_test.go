@@ -33,7 +33,7 @@ import (
 
 // dialTestNotifier starts a test HTTP server that upgrades connections and registers
 // them with the notifier. Returns the server and a client-side WS connection.
-func dialTestNotifier(t *testing.T, notifier *DashboardNotifier) (*httptest.Server, *websocket.Conn) {
+func dialTestNotifier(t *testing.T, notifier *DashboardNotifier) *websocket.Conn {
 	t.Helper()
 	upgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +57,7 @@ func dialTestNotifier(t *testing.T, notifier *DashboardNotifier) (*httptest.Serv
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
-	return srv, conn
+	return conn
 }
 
 func TestDashboardNotifier_Start(t *testing.T) {
@@ -97,7 +97,7 @@ func TestDashboardNotifier_Notify(t *testing.T) {
 
 func TestDashboardNotifier_Register(t *testing.T) {
 	notifier := NewDashboardNotifier()
-	_, _ = dialTestNotifier(t, notifier)
+	_ = dialTestNotifier(t, notifier)
 
 	// Give the goroutine time to register.
 	time.Sleep(20 * time.Millisecond)
@@ -109,7 +109,7 @@ func TestDashboardNotifier_Register(t *testing.T) {
 
 func TestDashboardNotifier_Unregister(t *testing.T) {
 	notifier := NewDashboardNotifier()
-	_, clientConn := dialTestNotifier(t, notifier)
+	clientConn := dialTestNotifier(t, notifier)
 
 	time.Sleep(20 * time.Millisecond)
 	notifier.mu.Lock()
@@ -125,8 +125,8 @@ func TestDashboardNotifier_Unregister(t *testing.T) {
 
 func TestDashboardNotifier_CloseAll(t *testing.T) {
 	notifier := NewDashboardNotifier()
-	_, _ = dialTestNotifier(t, notifier)
-	_, _ = dialTestNotifier(t, notifier)
+	_ = dialTestNotifier(t, notifier)
+	_ = dialTestNotifier(t, notifier)
 
 	time.Sleep(20 * time.Millisecond)
 	notifier.mu.Lock()
@@ -165,7 +165,7 @@ func TestDashboardNotifier_Start_ContextCancelled(t *testing.T) {
 func TestDashboardNotifier_Register_Multiple(t *testing.T) {
 	notifier := NewDashboardNotifier()
 	for range 5 {
-		_, _ = dialTestNotifier(t, notifier)
+		_ = dialTestNotifier(t, notifier)
 	}
 	time.Sleep(50 * time.Millisecond)
 	notifier.mu.Lock()
@@ -175,11 +175,9 @@ func TestDashboardNotifier_Register_Multiple(t *testing.T) {
 
 func TestDashboardNotifier_NotifyBroadcast(t *testing.T) {
 	notifier := NewDashboardNotifier()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = notifier.Start(ctx) }()
+	go func() { _ = notifier.Start(t.Context()) }()
 
-	_, clientConn := dialTestNotifier(t, notifier)
+	clientConn := dialTestNotifier(t, notifier)
 	time.Sleep(20 * time.Millisecond)
 
 	notifier.Notify()
@@ -312,7 +310,7 @@ func TestInjectAuthConfig_InvalidConfig(t *testing.T) {
 	type invalidConfig struct {
 		Func func() `json:"func"`
 	}
-	_, err := json.Marshal(invalidConfig{Func: func() {}})
+	_, err := json.Marshal(invalidConfig{Func: func() {}}) //nolint:staticcheck
 	assert.Error(t, err)
 }
 
@@ -383,45 +381,45 @@ func TestRequireAuthentication_Disabled(t *testing.T) {
 func TestOpenAPISpec(t *testing.T) {
 	spec := openAPISpec()
 	assert.Equal(t, "3.0.3", spec["openapi"])
-	assert.Equal(t, "cupboard API", spec["info"].(map[string]interface{})["title"])
-	securitySchemes := spec["components"].(map[string]interface{})["securitySchemes"].(map[string]interface{})
-	assert.Equal(t, "http", securitySchemes["bearerAuth"].(map[string]interface{})["type"])
-	assert.Equal(t, "bearer", securitySchemes["bearerAuth"].(map[string]interface{})["scheme"])
-	paths := spec["paths"].(map[string]interface{})
+	assert.Equal(t, "cupboard API", spec["info"].(map[string]any)["title"])
+	securitySchemes := spec["components"].(map[string]any)["securitySchemes"].(map[string]any)
+	assert.Equal(t, "http", securitySchemes["bearerAuth"].(map[string]any)["type"])
+	assert.Equal(t, "bearer", securitySchemes["bearerAuth"].(map[string]any)["scheme"])
+	paths := spec["paths"].(map[string]any)
 	assert.Contains(t, paths, "/api/session")
 	assert.Contains(t, paths, "/api/dashboard")
 }
 
 func TestOpenAPISpec_SessionEndpoint(t *testing.T) {
 	spec := openAPISpec()
-	sessionPath := spec["paths"].(map[string]interface{})["/api/session"].(map[string]interface{})
+	sessionPath := spec["paths"].(map[string]any)["/api/session"].(map[string]any)
 	assert.Contains(t, sessionPath, "get")
 	assert.Contains(t, sessionPath, "post")
 	assert.Contains(t, sessionPath, "delete")
-	getOp := sessionPath["get"].(map[string]interface{})
+	getOp := sessionPath["get"].(map[string]any)
 	assert.Equal(t, "Get session userinfo from cookie", getOp["summary"])
 }
 
 func TestOpenAPISpec_DashboardEndpoint(t *testing.T) {
 	spec := openAPISpec()
-	dashboardPath := spec["paths"].(map[string]interface{})["/api/dashboard"].(map[string]interface{})
+	dashboardPath := spec["paths"].(map[string]any)["/api/dashboard"].(map[string]any)
 	assert.Contains(t, dashboardPath, "get")
-	getOp := dashboardPath["get"].(map[string]interface{})
+	getOp := dashboardPath["get"].(map[string]any)
 	assert.Equal(t, "Get grouped dashboard links", getOp["summary"])
 }
 
 func TestOpenAPISpec_SecurityScheme(t *testing.T) {
 	spec := openAPISpec()
-	securitySchemes := spec["components"].(map[string]interface{})["securitySchemes"].(map[string]interface{})
+	securitySchemes := spec["components"].(map[string]any)["securitySchemes"].(map[string]any)
 	assert.Contains(t, securitySchemes, "bearerAuth")
-	bearerAuth := securitySchemes["bearerAuth"].(map[string]interface{})
+	bearerAuth := securitySchemes["bearerAuth"].(map[string]any)
 	assert.Equal(t, "http", bearerAuth["type"])
 	assert.Equal(t, "bearer", bearerAuth["scheme"])
 }
 
 func TestOpenAPISpec_PathStructure(t *testing.T) {
 	spec := openAPISpec()
-	assert.IsType(t, map[string]interface{}{}, spec)
+	assert.IsType(t, map[string]any{}, spec)
 	assert.Contains(t, spec, "openapi")
 	assert.Contains(t, spec, "info")
 	assert.Contains(t, spec, "components")
@@ -430,31 +428,31 @@ func TestOpenAPISpec_PathStructure(t *testing.T) {
 
 func TestOpenAPISpec_InfoStructure(t *testing.T) {
 	spec := openAPISpec()
-	info := spec["info"].(map[string]interface{})
+	info := spec["info"].(map[string]any)
 	assert.Equal(t, "cupboard API", info["title"])
 	assert.Equal(t, "v1", info["version"])
 }
 
 func TestOpenAPISpec_SecuritySchemesStructure(t *testing.T) {
 	spec := openAPISpec()
-	securitySchemes := spec["components"].(map[string]interface{})["securitySchemes"].(map[string]interface{})
-	assert.IsType(t, map[string]interface{}{}, securitySchemes)
+	securitySchemes := spec["components"].(map[string]any)["securitySchemes"].(map[string]any)
+	assert.IsType(t, map[string]any{}, securitySchemes)
 }
 
 func TestOpenAPISpec_DashboardSecurity(t *testing.T) {
 	spec := openAPISpec()
-	dashboardPath := spec["paths"].(map[string]interface{})["/api/dashboard"].(map[string]interface{})
-	getOp := dashboardPath["get"].(map[string]interface{})
-	security := getOp["security"].([]map[string]interface{})
+	dashboardPath := spec["paths"].(map[string]any)["/api/dashboard"].(map[string]any)
+	getOp := dashboardPath["get"].(map[string]any)
+	security := getOp["security"].([]map[string]any)
 	assert.Len(t, security, 1)
 	assert.Contains(t, security[0], "bearerAuth")
 }
 
 func TestOpenAPISpec_SessionSecurity(t *testing.T) {
 	spec := openAPISpec()
-	sessionPath := spec["paths"].(map[string]interface{})["/api/session"].(map[string]interface{})
-	postOp := sessionPath["post"].(map[string]interface{})
-	security := postOp["security"].([]map[string]interface{})
+	sessionPath := spec["paths"].(map[string]any)["/api/session"].(map[string]any)
+	postOp := sessionPath["post"].(map[string]any)
+	security := postOp["security"].([]map[string]any)
 	assert.Len(t, security, 1)
 	assert.Contains(t, security[0], "bearerAuth")
 }

@@ -305,7 +305,7 @@ func (c *dashboardCollector) logMissingOptionalResources(ctx context.Context) {
 	}
 }
 
-func (c *dashboardCollector) resourceAvailable(ctx context.Context, groupVersion schema.GroupVersion, kind string) bool {
+func (c *dashboardCollector) resourceAvailable(ctx context.Context, groupVersion schema.GroupVersion, kind string) bool { //nolint:unparam
 	if c.discovery == nil {
 		return false
 	}
@@ -691,7 +691,7 @@ func collectDNSEndpoints(ctx context.Context, c client.Reader, groups map[string
 		if meta.URL == "" {
 			if endpoints, found, err := unstructured.NestedSlice(ep.Object, "spec", "endpoints"); err == nil && found {
 				for _, item := range endpoints {
-					endpointMap, ok := item.(map[string]interface{})
+					endpointMap, ok := item.(map[string]any)
 					if !ok {
 						continue
 					}

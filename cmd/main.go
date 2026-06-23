@@ -93,12 +93,13 @@ func setupRuntimeConfig(localTesting bool) (*rest.Config, func(), error) {
 	}
 
 	// Use kind cluster when local testing is requested.
-	cfg, err := clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
-	if err == nil {
+	var cfg *rest.Config
+	if _, err := clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile); err == nil {
 		// Try to use the kind-cupboard context.
 		loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: clientcmd.RecommendedHomeFile}
 		configOverrides := &clientcmd.ConfigOverrides{CurrentContext: "kind-cupboard"}
 		clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+		var err error
 		cfg, err = clientConfig.ClientConfig()
 		if err == nil {
 			setupLog.Info("Using kind cluster (kind-cupboard)")
@@ -650,9 +651,9 @@ func main() {
 // whenever a resource that affects the dashboard changes. Must be called before mgr.Start().
 func setupDashboardWatches(mgr ctrl.Manager, notifier *web.DashboardNotifier, dc *discovery.DiscoveryClient) {
 	notify := toolscache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ interface{}) { notifier.Notify() },
-		UpdateFunc: func(_, _ interface{}) { notifier.Notify() },
-		DeleteFunc: func(_ interface{}) { notifier.Notify() },
+		AddFunc:    func(_ any) { notifier.Notify() },
+		UpdateFunc: func(_, _ any) { notifier.Notify() },
+		DeleteFunc: func(_ any) { notifier.Notify() },
 	}
 
 	addWatch := func(obj ctrlclient.Object) {

@@ -162,7 +162,7 @@ func pageTemplatePath(set, name string) (string, error) {
 	if strings.Contains(set, `\`) {
 		return "", fmt.Errorf("template set %q must use slash-separated paths", set)
 	}
-	for _, part := range strings.Split(set, "/") {
+	for part := range strings.SplitSeq(set, "/") {
 		if part == "" || part == "." || part == ".." {
 			return "", fmt.Errorf("template set %q contains an invalid path segment", set)
 		}

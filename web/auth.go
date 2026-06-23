@@ -23,19 +23,21 @@ const (
 	sessionCookieName = "cupboard_userinfo"
 	sessionTTL        = 24 * time.Hour
 	issuerCheckTTL    = 30 * time.Second
+	schemeHTTPS       = "https"
+	schemeHTTP        = "http"
 )
 
 type authContextKey struct{}
 
 type sessionPayload struct {
-	ExpiresAt int64                  `json:"expiresAt"`
-	UserInfo  map[string]interface{} `json:"userInfo"`
-	Groups    []string               `json:"groups,omitempty"`
+	ExpiresAt int64          `json:"expiresAt"`
+	UserInfo  map[string]any `json:"userInfo"`
+	Groups    []string       `json:"groups,omitempty"`
 }
 
 type authSession struct {
-	UserInfo map[string]interface{} `json:"userInfo"`
-	Groups   []string               `json:"groups,omitempty"`
+	UserInfo map[string]any `json:"userInfo"`
+	Groups   []string       `json:"groups,omitempty"`
 }
 
 type authService struct {
@@ -111,21 +113,21 @@ func (a *authService) authConfig(ctx context.Context, requestIssuerURL string) a
 	}
 }
 
-func newAuthSession(userInfo map[string]interface{}) authSession {
+func newAuthSession(userInfo map[string]any) authSession {
 	return authSession{
 		UserInfo: userInfo,
 		Groups:   userGroupsFromUserInfo(userInfo),
 	}
 }
 
-func userGroupsFromUserInfo(userInfo map[string]interface{}) []string {
+func userGroupsFromUserInfo(userInfo map[string]any) []string {
 	if userInfo == nil {
 		return nil
 	}
 	return normalizedGroups(userInfo["groups"])
 }
 
-func normalizedGroups(raw interface{}) []string {
+func normalizedGroups(raw any) []string {
 	seen := map[string]struct{}{}
 	var groups []string
 	add := func(group string) {
@@ -145,14 +147,14 @@ func normalizedGroups(raw interface{}) []string {
 		for _, group := range value {
 			add(group)
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range value {
 			if group, ok := item.(string); ok {
 				add(group)
 			}
 		}
 	case string:
-		for _, group := range strings.Split(value, ",") {
+		for group := range strings.SplitSeq(value, ",") {
 			add(group)
 		}
 	}
@@ -197,9 +199,9 @@ func (a *authService) serveOpenIDConfiguration(w http.ResponseWriter, r *http.Re
 			if readErr != nil {
 				return readErr
 			}
-			defer resp.Body.Close()
+			defer resp.Body.Close() //nolint:errcheck
 
-			var payload map[string]interface{}
+			var payload map[string]any
 			if err := json.Unmarshal(body, &payload); err != nil {
 				resp.Body = io.NopCloser(bytes.NewReader(body))
 				resp.ContentLength = int64(len(body))
@@ -227,7 +229,7 @@ func (a *authService) serveOpenIDConfiguration(w http.ResponseWriter, r *http.Re
 
 func (a *authService) authenticateRequest(ctx context.Context, r *http.Request, w http.ResponseWriter) (authSession, error) {
 	if !a.enabled {
-		return authSession{UserInfo: map[string]interface{}{"sub": "anonymous"}}, nil
+		return authSession{UserInfo: map[string]any{"sub": "anonymous"}}, nil
 	}
 	token := bearerTokenFromRequest(r)
 	if token != "" {
@@ -265,7 +267,7 @@ func (a *authService) userInfoFromCookie(r *http.Request) (authSession, error) {
 	return authSession{UserInfo: payload.UserInfo, Groups: groups}, nil
 }
 
-func (a *authService) fetchUserInfo(ctx context.Context, token string) (map[string]interface{}, error) {
+func (a *authService) fetchUserInfo(ctx context.Context, token string) (map[string]any, error) {
 	userInfoEndpoint, err := a.userInfoEndpoint(ctx)
 	if err != nil {
 		return nil, err
@@ -279,12 +281,12 @@ func (a *authService) fetchUserInfo(ctx context.Context, token string) (map[stri
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode >= http.StatusBadRequest {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("userinfo request failed with %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	var userInfo map[string]interface{}
+	var userInfo map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
 		return nil, err
 	}
@@ -319,7 +321,7 @@ func (a *authService) userInfoEndpoint(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode >= http.StatusBadRequest {
 		return "", fmt.Errorf("oidc discovery failed with %d", resp.StatusCode)
 	}
@@ -364,11 +366,6 @@ func (a *authService) clearSessionCookie(w http.ResponseWriter) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-}
-
-func userInfoFromContext(ctx context.Context) (map[string]interface{}, bool) {
-	session, ok := ctx.Value(authContextKey{}).(authSession)
-	return session.UserInfo, ok
 }
 
 func authSessionFromContext(ctx context.Context) (authSession, bool) {
@@ -466,7 +463,7 @@ func isReachable(ctx context.Context, httpClient *http.Client, rawURL string) bo
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
@@ -486,9 +483,9 @@ func requestBaseURL(r *http.Request) string {
 	}
 	if scheme == "" {
 		if r.TLS != nil {
-			scheme = "https"
+			scheme = schemeHTTPS
 		} else {
-			scheme = "http"
+			scheme = schemeHTTP
 		}
 	}
 	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
@@ -499,12 +496,4 @@ func requestBaseURL(r *http.Request) string {
 		host = r.Host
 	}
 	return scheme + "://" + host
-}
-
-func isAbsoluteHTTPURL(raw string) bool {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
