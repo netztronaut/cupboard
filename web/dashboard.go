@@ -832,7 +832,7 @@ func collectDNSEndpoints(ctx context.Context, c client.Reader, groups map[string
 		if meta.URL == "" {
 			if endpoints, found, err := unstructured.NestedSlice(ep.Object, "spec", "endpoints"); err == nil && found {
 				for _, item := range endpoints {
-					endpointMap, ok := item.(map[string]interface{})
+					endpointMap, ok := item.(map[string]any)
 					if !ok {
 						continue
 					}
