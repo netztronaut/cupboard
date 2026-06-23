@@ -3,18 +3,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/name: {{ include "cupboard.name" . }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include ( printf "%s.%s" .Chart.Name "labels" ) . | nindent 4 }}
     control-plane: controller-manager
     {{- with .Values.manager.labels }}
     {{- with omit . "app.kubernetes.io/managed-by" "app.kubernetes.io/name" "helm.sh/chart" "app.kubernetes.io/instance" "control-plane" }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
     {{- end }}
-  name: {{ include "cupboard.resourceName" (dict "suffix" "controller-manager" "context" $) }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "controller-manager" "context" $) }}
   {{- if .Values.manager.annotations }}
   annotations:
     {{- toYaml .Values.manager.annotations | nindent 4 }}
@@ -26,7 +22,7 @@ spec:
   replicas: {{ .Values.manager.replicas }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ include "cupboard.name" . }}
+      {{- include ( printf "%s.%s" .Chart.Name "selectorLabels" ) . | nindent 6 }}
       control-plane: controller-manager
   template:
     metadata:
@@ -40,10 +36,7 @@ spec:
         {{- end }}
         {{- end }}
       labels:
-        app.kubernetes.io/name: {{ include "cupboard.name" . }}
-        helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-        app.kubernetes.io/instance: {{ .Release.Name }}
-        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        {{- include ( printf "%s.%s" .Chart.Name "selectorLabels" ) . | nindent 8 }}
         control-plane: controller-manager
         {{- with .Values.manager.pod }}
         {{- with .labels }}
@@ -157,7 +150,7 @@ spec:
         {{- else }}
         {}
         {{- end }}
-      serviceAccountName: {{ include "cupboard.serviceAccountName" . }}
+      serviceAccountName: {{ include ( printf "%s.%s" .Chart.Name "serviceAccountName" ) . }}
       {{- if and (hasKey .Values.manager "terminationGracePeriodSeconds") (ne .Values.manager.terminationGracePeriodSeconds nil) }}
       terminationGracePeriodSeconds: {{ .Values.manager.terminationGracePeriodSeconds }}
       {{- end }}

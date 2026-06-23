@@ -94,13 +94,14 @@ func setupRuntimeConfig(localTesting bool) (*rest.Config, func(), error) {
 	}
 
 	// Use kind cluster when local testing is requested.
-	_, err := clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
-	if err == nil {
+	var cfg *rest.Config
+	if _, err := clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile); err == nil {
 		// Try to use the kind-cupboard context.
 		loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: clientcmd.RecommendedHomeFile}
 		configOverrides := &clientcmd.ConfigOverrides{CurrentContext: "kind-cupboard"}
 		clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-		cfg, err := clientConfig.ClientConfig()
+		var err error
+		cfg, err = clientConfig.ClientConfig()
 		if err == nil {
 			setupLog.Info("Using kind cluster (kind-cupboard)")
 			return cfg, func() {}, nil

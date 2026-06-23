@@ -3,13 +3,9 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/name: {{ include "cupboard.name" . }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include ( printf "%s.%s" .Chart.Name "labels" ) . | nindent 4 }}
     control-plane: controller-manager
-  name: {{ include "cupboard.resourceName" (dict "suffix" "controller-manager-metrics-monitor" "context" $) }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "controller-manager-metrics-monitor" "context" $) }}
 spec:
   endpoints:
   - {{- if .Values.metrics.secure }}
@@ -20,7 +16,7 @@ spec:
     scheme: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
     {{- if .Values.metrics.secure }}
     tlsConfig:
-      serverName: {{ include "cupboard.resourceName" (dict "suffix" "controller-manager-metrics-service" "context" $) }}.{{ .Release.Namespace }}.svc
+      serverName: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "controller-manager-metrics-service" "context" $) }}.{{ .Release.Namespace }}.svc
       {{- if .Values.certManager.enable }}
       ca:
         secret:
@@ -39,6 +35,6 @@ spec:
     {{- end }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ include "cupboard.name" . }}
+      app.kubernetes.io/name: {{ include ( printf "%s.%s" .Chart.Name "name" ) . }}
       control-plane: controller-manager
 {{- end }}

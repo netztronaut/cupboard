@@ -6,9 +6,8 @@ kind: ClusterRole
 {{- end }}
 metadata:
 {{- if .Values.rbac.namespaced }}
-  namespace: {{ .Release.Namespace }}
 {{- end }}
-  name: {{ include "cupboard.resourceName" (dict "suffix" "manager-role" "context" $) }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "manager-role" "context" $) }}
 rules:
 - apiGroups:
   - ""

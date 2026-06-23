@@ -1,0 +1,12 @@
+{{- $Context := . }}
+{{- $labelsPatch := dict "metadata" (dict "labels" ( include ( printf "%s.%s" .Chart.Name "labels" ) . | fromYaml ) ) }}
+{{- range $resource := .Values.additionalResources }}
+---
+{{/* case $resource is a string, template it */}}
+{{- if kindIs "string" $resource }}
+{{- tpl $resource $Context }}
+{{- else if kindIs "map" $resource }}
+{{/* case $resource is a map, inject the helm labels and convert to yaml */}}
+{{- merge $resource $labelsPatch | toYaml }}
+{{- end }}
+{{- end }}

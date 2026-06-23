@@ -19,10 +19,6 @@
 ##     --namespace cupboard-system
 
 manager:
-  image:
-    repository: docker.io/netztronaut/cupboard
-    tag: latest
-
   env:
     - name: WATCH_NAMESPACE
       valueFrom:
@@ -68,35 +64,728 @@ manager:
 forecastle:
   enabled: true
 
-## Example content for the mounted cupboard.yaml:
-##
-## watchNamespace: cupboard-system
-## localTesting: false
-## enableWebhooks: true
-## page:
-##   templateSet: custom-theme
-##   title: Cupboard
-##   faviconURL: /favicon.svg
-##   contentLayout: grid
-## auth:
-##   enabled: true
-##   issuerURL: https://auth.example.com/application/o/cupboard/
-##   clientID: cupboard
-##   redirectPath: /auth/callback
-##   scopes: openid profile email
-##   userInfoEndpoint: https://auth.example.com/application/o/userinfo/
-## forecastle:
-##   instance: cupboard
-## dashboard:
-##   linkGroups:
-##     - name: code-devops
-##       displayName: Code & DevOps
-##       priority: 10
-##   staticLinks:
-##     - linkGroup: code-devops
-##       name: GitHub
-##       url: https://github.com
-##       target: _blank
-##       icon: fa-github
-##       groups:
-##         - code-internal
+additionalResources:
+  - |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: cupboard-config
+        labels:
+          {{- include "cupboard.labels" . | nindent 4 }}
+      data:
+        ## Example content for the mounted cupboard.yaml:
+        cupboard.yaml: |
+          watchNamespace: cupboard-system
+          localTesting: false
+          enableWebhooks: true
+          page:
+            templateSet: custom-theme
+            title: Cupboard
+            faviconURL: /favicon.svg
+            contentLayout: grid
+          auth:
+            enabled: true
+            issuerURL: https://auth.example.com/application/o/cupboard/
+            clientID: cupboard
+            redirectPath: /auth/callback
+            scopes: openid profile email
+            userInfoEndpoint: https://auth.example.com/application/o/userinfo/
+          forecastle:
+            instance: cupboard
+          dashboard:
+            linkGroups:
+              - name: code-devops
+                displayName: Code & DevOps
+                priority: 10
+            staticLinks:
+              - linkGroup: code-devops
+                name: GitHub
+                url: https://github.com
+                target: _blank
+                icon: fa-github
+                groups:
+                  - code-internal
+  - |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: cupboard-custom-theme
+        labels:
+          {{- include "cupboard.labels" . | nindent 4 }}
+      data:
+        page.tmpl: |
+          {{define "page"}}
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>{{.Title}}</title>
+              {{if .FaviconURL}}<link rel="icon" href="{{.FaviconURL}}" />{{end}}
+              <link rel="stylesheet" href="/static/fontawesome/css/fontawesome.min.css" />
+              <link rel="stylesheet" href="/static/fontawesome/css/brands.min.css" />
+              <link rel="stylesheet" href="/static/fontawesome/css/solid.min.css" />
+              <style>
+                :root { color-scheme: light; }
+                :root[data-theme="dark"] { color-scheme: dark; }
+                * { box-sizing: border-box; }
+                body {
+                  margin: 0;
+                  font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                  color: #0f172a;
+                  background: #f8fafc;
+                }
+                a { color: inherit; text-decoration: none; }
+                .container {
+                  width: min(1232px, calc(100% - 48px));
+                  margin: 0 auto;
+                }
+          
+                .fc-header {
+                  position: sticky;
+                  top: 0;
+                  z-index: 10;
+                  background: #fff;
+                  border-bottom: 1px solid #e2e8f0;
+                }
+                .fc-toolbar {
+                  min-height: 64px;
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  gap: 1rem;
+                }
+                .fc-brand {
+                  display: inline-flex;
+                  align-items: center;
+                  gap: .75rem;
+                  min-width: 170px;
+                }
+                .fc-brand-mark {
+                  width: 32px;
+                  height: 32px;
+                  border-radius: 8px;
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  background: #0f172a;
+                  color: #fff;
+                  font-size: .9rem;
+                }
+                .fc-brand-title {
+                  margin: 0;
+                  font-size: 1.25rem;
+                  font-weight: 700;
+                }
+          
+                .fc-search {
+                  position: relative;
+                  width: min(420px, 100%);
+                }
+                .fc-search input {
+                  width: 100%;
+                  height: 40px;
+                  border: 1px solid #cbd5e1;
+                  border-radius: 10px;
+                  padding: 0 3.25rem 0 2.5rem;
+                  font-size: .95rem;
+                  color: #0f172a;
+                  background: #fff;
+                }
+                .fc-search input:focus {
+                  outline: none;
+                  border-color: #94a3b8;
+                  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
+                }
+                .fc-search .search-icon {
+                  position: absolute;
+                  left: .85rem;
+                  top: 50%;
+                  transform: translateY(-50%);
+                  color: #64748b;
+                }
+                .fc-search .search-shortcut {
+                  position: absolute;
+                  right: .6rem;
+                  top: 50%;
+                  transform: translateY(-50%);
+                  border: 1px solid #cbd5e1;
+                  background: #f8fafc;
+                  border-radius: 6px;
+                  padding: .1rem .35rem;
+                  font-size: .75rem;
+                  color: #64748b;
+                }
+          
+                .fc-toolbar-right {
+                  display: inline-flex;
+                  align-items: center;
+                  gap: .75rem;
+                }
+                .fc-sync {
+                  border: 1px solid #e2e8f0;
+                  border-radius: 999px;
+                  padding: .35rem .6rem;
+                  font-size: .82rem;
+                  color: #475569;
+                  background: #fff;
+                  white-space: nowrap;
+                }
+                .fc-theme-toggle {
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  width: 32px;
+                  height: 32px;
+                  border: 1px solid #e2e8f0;
+                  border-radius: 999px;
+                  background: #fff;
+                  color: #475569;
+                  cursor: pointer;
+                }
+                .fc-theme-toggle:hover {
+                  background: #f1f5f9;
+                }
+          
+                .fc-main {
+                  padding: 1.5rem 0 2.5rem;
+                }
+                .fc-groups {
+                  display: grid;
+                  gap: 1rem;
+                }
+                .fc-group {
+                  border: 1px solid #e2e8f0;
+                  background: #fff;
+                  border-radius: 12px;
+                  overflow: hidden;
+                }
+                .fc-group details {
+                  border: 0;
+                }
+                .fc-group summary {
+                  list-style: none;
+                }
+                .fc-group summary::-webkit-details-marker {
+                  display: none;
+                }
+                .fc-group-summary {
+                  min-height: 52px;
+                  padding: .9rem 1rem;
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  gap: .75rem;
+                  cursor: pointer;
+                  border-bottom: 1px solid #e2e8f0;
+                }
+                .fc-group-meta {
+                  display: inline-flex;
+                  align-items: center;
+                  gap: .65rem;
+                }
+                .fc-group-name {
+                  margin: 0;
+                  font-size: 1rem;
+                  font-weight: 600;
+                }
+                .fc-group-count {
+                  border-radius: 999px;
+                  padding: .1rem .45rem;
+                  background: #f1f5f9;
+                  color: #334155;
+                  font-size: .75rem;
+                  font-weight: 600;
+                }
+                .fc-group-chevron {
+                  color: #94a3b8;
+                  transition: transform .15s ease-in-out;
+                }
+                .fc-group details:not([open]) .fc-group-chevron {
+                  transform: rotate(-90deg);
+                }
+                .fc-group-panel {
+                  padding: 1rem;
+                }
+                .fc-cards {
+                  display: grid;
+                  gap: 1rem;
+                  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+                }
+                .fc-card {
+                  border: 1px solid #e2e8f0;
+                  border-radius: 10px;
+                  overflow: hidden;
+                  background: #fff;
+                }
+                .fc-card-main {
+                  min-height: 146px;
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  justify-content: center;
+                  gap: .55rem;
+                  padding: 1.1rem .8rem .95rem;
+                }
+                .fc-card-main:hover {
+                  background: #f8fafc;
+                }
+                .fc-card-icon {
+                  width: 56px;
+                  height: 56px;
+                  border-radius: 999px;
+                  border: 1px solid #cbd5e1;
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  color: #334155;
+                  background: #fff;
+                  font-size: 1.2rem;
+                }
+                .fc-card-icon-image {
+                  width: 28px;
+                  height: 28px;
+                }
+                .fc-card-title {
+                  margin: 0;
+                  font-size: 1rem;
+                  font-weight: 600;
+                  text-align: center;
+                }
+                .fc-card-url {
+                  margin: 0;
+                  font-size: .78rem;
+                  color: #64748b;
+                  text-align: center;
+                }
+                .fc-card-actions {
+                  min-height: 46px;
+                  border-top: 1px solid #e2e8f0;
+                  padding: .45rem .65rem;
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  gap: .5rem;
+                }
+                .fc-source {
+                  font-size: .72rem;
+                  color: #475569;
+                  background: #f1f5f9;
+                  border-radius: 999px;
+                  padding: .2rem .5rem;
+                }
+                .fc-open {
+                  width: 28px;
+                  height: 28px;
+                  border-radius: 8px;
+                  border: 1px solid #cbd5e1;
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  color: #334155;
+                }
+                .fc-open:hover {
+                  background: #f8fafc;
+                }
+          
+                .fc-footer {
+                  border-top: 1px solid #e2e8f0;
+                  color: #64748b;
+                  font-size: .9rem;
+                  text-align: center;
+                  padding: 1rem 0;
+                }
+          
+                :root[data-theme="dark"] body {
+                  color: #e2e8f0;
+                  background: #0b1220;
+                }
+                :root[data-theme="dark"] .fc-header {
+                  background: #111827;
+                  border-bottom-color: #334155;
+                }
+                :root[data-theme="dark"] .fc-brand-mark {
+                  background: #e2e8f0;
+                  color: #111827;
+                }
+                :root[data-theme="dark"] .fc-search input {
+                  border-color: #334155;
+                  color: #e2e8f0;
+                  background: #0f172a;
+                }
+                :root[data-theme="dark"] .fc-search input:focus {
+                  border-color: #64748b;
+                  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.3);
+                }
+                :root[data-theme="dark"] .fc-search .search-icon,
+                :root[data-theme="dark"] .fc-search .search-shortcut {
+                  color: #94a3b8;
+                }
+                :root[data-theme="dark"] .fc-search .search-shortcut {
+                  border-color: #334155;
+                  background: #1e293b;
+                }
+                :root[data-theme="dark"] .fc-theme-toggle {
+                  border-color: #334155;
+                  background: #0f172a;
+                  color: #cbd5e1;
+                }
+                :root[data-theme="dark"] .fc-theme-toggle:hover {
+                  background: #1e293b;
+                }
+                :root[data-theme="dark"] .fc-group,
+                :root[data-theme="dark"] .fc-card {
+                  border-color: #334155;
+                  background: #111827;
+                }
+                :root[data-theme="dark"] .fc-group-summary,
+                :root[data-theme="dark"] .fc-card-actions {
+                  border-color: #334155;
+                }
+                :root[data-theme="dark"] .fc-group-count,
+                :root[data-theme="dark"] .fc-source {
+                  color: #cbd5e1;
+                  background: #1e293b;
+                }
+                :root[data-theme="dark"] .fc-group-chevron {
+                  color: #64748b;
+                }
+                :root[data-theme="dark"] .fc-card-main:hover,
+                :root[data-theme="dark"] .fc-open:hover {
+                  background: #0f172a;
+                }
+                :root[data-theme="dark"] .fc-card-icon,
+                :root[data-theme="dark"] .fc-open {
+                  border-color: #334155;
+                  color: #cbd5e1;
+                  background: #111827;
+                }
+                :root[data-theme="dark"] .fc-card-url {
+                  color: #94a3b8;
+                }
+                :root[data-theme="dark"] .fc-footer {
+                  border-top-color: #334155;
+                  color: #94a3b8;
+                }
+          
+                @media (max-width: 980px) {
+                  .fc-toolbar {
+                    flex-wrap: wrap;
+                    justify-content: center;
+                    padding: .75rem 0;
+                  }
+                  .fc-brand {
+                    width: 100%;
+                    justify-content: center;
+                  }
+                  .fc-toolbar-right {
+                    width: 100%;
+                    justify-content: center;
+                  }
+                }
+              </style>
+              <script>
+                window.addEventListener("DOMContentLoaded", function () {
+                  const input = document.getElementById("fc-search-input");
+                  const themeToggle = document.getElementById("fc-theme-toggle");
+                  const themeIcon = document.getElementById("fc-theme-icon");
+                  const groupsNode = document.getElementById("dashboard-groups");
+                  const statusNode = document.getElementById("dashboard-status");
+                  if (!input || !groupsNode || !statusNode) return;
+                  const minRefreshIntervalMs = 2000;
+                  let lastRefreshAt = 0;
+                  let scheduledRefresh = null;
+                  let ws = null;
+                  let filterListenerAttached = false;
+          
+                  const focusSearch = () => {
+                    input.focus();
+                    input.select();
+                  };
+                  document.addEventListener("keydown", (event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+                      event.preventDefault();
+                      focusSearch();
+                    }
+                  });
+          
+                  const themeStates = ["system", "light", "dark"];
+                  const themeMedia = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+                  const resolveTheme = (pref) => (pref === "system" ? (themeMedia && themeMedia.matches ? "dark" : "light") : pref);
+                  const nextThemeState = (current) => themeStates[(themeStates.indexOf(current) + 1) % themeStates.length];
+                  const applyThemePreference = (pref) => {
+                    const effective = resolveTheme(pref);
+                    document.documentElement.setAttribute("data-theme", effective);
+                    document.documentElement.setAttribute("data-theme-preference", pref);
+                    if (!themeToggle || !themeIcon) return;
+                    themeIcon.classList.remove("fa-sun", "fa-moon", "fa-circle-half-stroke");
+                    if (pref === "dark") {
+                      themeIcon.classList.add("fa-moon");
+                    } else if (pref === "light") {
+                      themeIcon.classList.add("fa-sun");
+                    } else {
+                      themeIcon.classList.add("fa-circle-half-stroke");
+                    }
+                    themeToggle.setAttribute("aria-label", `Theme: ${pref}`);
+                    themeToggle.setAttribute("title", `Theme: ${pref}`);
+                  };
+                  const storedTheme = localStorage.getItem("cupboard-theme");
+                  const initialThemePref = themeStates.includes(storedTheme) ? storedTheme : "system";
+                  applyThemePreference(initialThemePref);
+                  if (themeToggle) {
+                    themeToggle.addEventListener("click", function () {
+                      const currentPref = document.documentElement.getAttribute("data-theme-preference") || "system";
+                      const nextPref = nextThemeState(currentPref);
+                      localStorage.setItem("cupboard-theme", nextPref);
+                      applyThemePreference(nextPref);
+                    });
+                  }
+                  if (themeMedia && typeof themeMedia.addEventListener === "function") {
+                    themeMedia.addEventListener("change", function () {
+                      const pref = document.documentElement.getAttribute("data-theme-preference") || "system";
+                      if (pref === "system") {
+                        applyThemePreference("system");
+                      }
+                    });
+                  }
+          
+                  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => (
+                    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+                  ));
+                  const urlHost = (raw) => {
+                    const value = String(raw || "").trim();
+                    if (!value) return "";
+                    try {
+                      const parsed = new URL(value);
+                      return (parsed.hostname || parsed.host || value).replace(/^www\./, "");
+                    } catch (_) {
+                      return value;
+                    }
+                  };
+                  const iconAssetURL = (icon) => {
+                    const value = String(icon || "").trim();
+                    if (value.startsWith("http://") || value.startsWith("https://")) return value;
+                    const split = value.split(":");
+                    if (split.length !== 2) return "";
+                    const [prefix, name] = split;
+                    if (!/^[a-z0-9-]+$/.test(name)) return "";
+                    if (prefix === "lucide") return "/static/icons/lucide/" + name + ".svg";
+                    if (prefix === "tabler") return "/static/icons/tabler/" + name + ".svg";
+                    if (prefix === "hero") return "/static/icons/heroicons/24/outline/" + name + ".svg";
+                    return "";
+                  };
+                  const iconHTML = (icon, name) => {
+                    const value = String(icon || "").trim();
+                    if (value.startsWith("fa-")) return `<i class="fa-brands ${esc(value)}" aria-hidden="true"></i>`;
+                    const asset = iconAssetURL(value);
+                    if (asset) return `<img class="fc-card-icon-image" src="${esc(asset)}" alt="" />`;
+                    const fallback = String(name || "?").trim().charAt(0) || "?";
+                    return esc(fallback.toUpperCase());
+                  };
+                  const sourceBadgeHTML = (source) => {
+                    if (source === "forecastleapp") return `<span class="fc-source"><i class="fa-solid fa-cubes" aria-hidden="true"></i> Forecastle</span>`;
+                    if (source === "bookmarkgroup") return `<span class="fc-source"><i class="fa-solid fa-cube" aria-hidden="true"></i> CRD</span>`;
+                    return `<span class="fc-source"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Config</span>`;
+                  };
+                  const linkCardHTML = (link) => {
+                    const target = link.target || "_self";
+                    const name = link.name || "";
+                    const url = link.url || "#";
+                    return `
+                      <article class="fc-card" data-search="${esc((name + " " + url).toLowerCase())}">
+                        <a class="fc-card-main" href="${esc(url)}" target="${esc(target)}" rel="noreferrer">
+                          <span class="fc-card-icon">${iconHTML(link.icon, name)}</span>
+                          <h3 class="fc-card-title">${esc(name)}</h3>
+                          <p class="fc-card-url">${esc(urlHost(url))}</p>
+                        </a>
+                        <div class="fc-card-actions">
+                          ${sourceBadgeHTML(link.source)}
+                          <a class="fc-open" href="${esc(url)}" target="_blank" rel="noreferrer" aria-label="Open in new tab">
+                            <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                          </a>
+                        </div>
+                      </article>
+                    `;
+                  };
+                  const filterCards = () => {
+                    const query = input.value.trim().toLowerCase();
+                    const cards = Array.from(groupsNode.querySelectorAll("[data-search]"));
+                    cards.forEach((card) => {
+                      card.style.display = !query || String(card.dataset.search || "").includes(query) ? "" : "none";
+                    });
+                  };
+          
+                  const renderDashboard = async () => {
+                    const response = await fetch("/api/dashboard", { credentials: "include" });
+                    if (!response.ok) throw new Error("dashboard request failed");
+                    const payload = await response.json();
+                    const groups = Array.isArray(payload.groups) ? payload.groups : [];
+                    if (!groups.length) {
+                      statusNode.textContent = "No links available.";
+                      lastRefreshAt = Date.now();
+                      return;
+                    }
+                    statusNode.closest(".fc-group").remove();
+                    groupsNode.innerHTML = groups.map((group) => `
+                      <section class="fc-group">
+                        <details open>
+                          <summary class="fc-group-summary">
+                            <span class="fc-group-meta">
+                              <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+                              <h2 class="fc-group-name">${esc(group.name || "")}</h2>
+                              <span class="fc-group-count">${Array.isArray(group.links) ? group.links.length : 0}</span>
+                            </span>
+                            <i class="fa-solid fa-chevron-down fc-group-chevron" aria-hidden="true"></i>
+                          </summary>
+                          <div class="fc-group-panel">
+                            <div class="fc-cards">
+                              ${(Array.isArray(group.links) ? group.links : []).map(linkCardHTML).join("")}
+                            </div>
+                          </div>
+                        </details>
+                      </section>
+                    `).join("");
+                    filterCards();
+                    lastRefreshAt = Date.now();
+                    if (!filterListenerAttached) {
+                      input.addEventListener("input", filterCards);
+                      filterListenerAttached = true;
+                    }
+                  };
+                  const scheduleRefresh = () => {
+                    const now = Date.now();
+                    const delay = Math.max(0, minRefreshIntervalMs - (now - lastRefreshAt));
+                    if (scheduledRefresh) {
+                      return;
+                    }
+                    scheduledRefresh = setTimeout(async function () {
+                      scheduledRefresh = null;
+                      try {
+                        await renderDashboard();
+                      } catch (_) {
+                        statusNode.textContent = "Failed to load links.";
+                      }
+                    }, delay);
+                  };
+                  const connectUpdates = () => {
+                    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+                    ws = new WebSocket(`${protocol}//${window.location.host}/api/dashboard/updates`);
+                    ws.addEventListener("message", function () {
+                      scheduleRefresh();
+                    });
+                    ws.addEventListener("close", function () {
+                      setTimeout(connectUpdates, 2000);
+                    });
+                    ws.addEventListener("error", function () {
+                      ws.close();
+                    });
+                  };
+          
+                  renderDashboard().catch(function () {
+                    statusNode.textContent = "Failed to load links.";
+                  });
+                  connectUpdates();
+                });
+              </script>
+            </head>
+            <body>
+              {{template "header" .}}
+              {{template "content" .}}
+              {{template "footer" .}}
+            </body>
+          </html>
+          {{end}}
+        header.tmpl: |
+          {{define "header"}}
+          <header class="fc-header">
+            <div class="container fc-toolbar">
+              <div class="fc-brand">
+                <span class="fc-brand-mark"><i class="fa-solid fa-cube" aria-hidden="true"></i></span>
+                <h1 class="fc-brand-title">{{.Title}}</h1>
+              </div>
+              <label class="fc-search" aria-label="Search applications">
+                <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+                <input id="fc-search-input" type="search" placeholder="Search apps..." />
+                <span class="search-shortcut">⌘K</span>
+              </label>
+              <div class="fc-toolbar-right">
+                <button id="fc-theme-toggle" class="fc-theme-toggle" type="button" aria-label="Theme: system">
+                  <i id="fc-theme-icon" class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+          </header>
+          {{end}}
+        footer.tmpl: |
+          {{define "footer"}}
+          <footer class="fc-footer">
+            <div class="container">Served by cupboard</div>
+          </footer>
+          {{end}}
+        content.tmpl: |
+          {{define "content"}}
+          <main class="fc-main">
+            <div id="dashboard-groups" class="container fc-groups"></div>
+            <div class="container">
+              <section class="fc-group">
+                <div id="dashboard-status" class="fc-group-panel">Loading links…</div>
+              </section>
+            </div>
+          </main>
+          {{end}}
+        group.tmpl: |
+          {{define "group"}}
+          <section class="fc-group">
+            <details open>
+              <summary class="fc-group-summary">
+                <span class="fc-group-meta">
+                  <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+                  <h2 class="fc-group-name">{{.Name}}</h2>
+                  <span class="fc-group-count">{{len .Links}}</span>
+                </span>
+                <i class="fa-solid fa-chevron-down fc-group-chevron" aria-hidden="true"></i>
+              </summary>
+              <div class="fc-group-panel">
+                <div class="fc-cards">
+                  {{range .Links}}
+                    {{template "link" .}}
+                  {{end}}
+                </div>
+              </div>
+            </details>
+          </section>
+          {{end}}
+        link.tmpl: |
+          {{define "link"}}
+          <article class="fc-card" data-search="{{lower .Name}} {{lower .URL}}">
+            <a class="fc-card-main" href="{{.URL}}" target="{{if .Target}}{{.Target}}{{else}}_self{{end}}" rel="noreferrer">
+              <span class="fc-card-icon">
+                {{if .Icon}}
+                  {{if isFontAwesomeKey .Icon}}
+                    <i class="fa-brands {{.Icon}}" aria-hidden="true"></i>
+                  {{else if iconAssetURL .Icon}}
+                    <img class="fc-card-icon-image" src="{{iconAssetURL .Icon}}" alt="" />
+                  {{else}}
+                    {{initial .Name}}
+                  {{end}}
+                {{else}}
+                  <i class="fa-solid fa-link" aria-hidden="true"></i>
+                {{end}}
+              </span>
+              <h3 class="fc-card-title">{{.Name}}</h3>
+              <p class="fc-card-url">{{urlHost .URL}}</p>
+            </a>
+            <div class="fc-card-actions">
+              {{if eq .Source "forecastleapp"}}
+                <span class="fc-source"><i class="fa-solid fa-cubes" aria-hidden="true"></i> Forecastle</span>
+              {{else if eq .Source "bookmarkgroup"}}
+                <span class="fc-source"><i class="fa-solid fa-cube" aria-hidden="true"></i> CRD</span>
+              {{else}}
+                <span class="fc-source"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Config</span>
+              {{end}}
+              <a class="fc-open" href="{{.URL}}" target="_blank" rel="noreferrer" aria-label="Open in new tab">
+                <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+              </a>
+            </div>
+          </article>
+          {{end}}

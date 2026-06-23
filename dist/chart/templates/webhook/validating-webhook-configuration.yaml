@@ -4,15 +4,15 @@ kind: ValidatingWebhookConfiguration
 metadata:
   annotations:
     {{- if .Values.certManager.enable }}
-    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "cupboard.resourceName" (dict "suffix" "serving-cert" "context" $) }}
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "serving-cert" "context" $) }}
     {{- end }}
-  name: {{ include "cupboard.resourceName" (dict "suffix" "validating-webhook-configuration" "context" $) }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "validating-webhook-configuration" "context" $) }}
 webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
     service:
-      name: {{ include "cupboard.resourceName" (dict "suffix" "webhook-service" "context" $) }}
+      name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "webhook-service" "context" $) }}
       namespace: {{ .Release.Namespace }}
       path: /validate-dashboard-netztronaut-de-v1alpha1-bookmarkgroup
   failurePolicy: Fail

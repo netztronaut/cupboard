@@ -23,6 +23,8 @@ const (
 	sessionCookieName = "cupboard_userinfo"
 	sessionTTL        = 24 * time.Hour
 	issuerCheckTTL    = 30 * time.Second
+	schemeHTTPS       = "https"
+	schemeHTTP        = "http"
 )
 
 type authContextKey struct{}
@@ -473,9 +475,6 @@ func oidcDiscoveryURL(issuerURL string) string {
 	}
 	return strings.TrimRight(issuerURL, "/") + "/.well-known/openid-configuration"
 }
-
-const schemeHTTPS = "https"
-const schemeHTTP = "http"
 
 func requestBaseURL(r *http.Request) string {
 	scheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))

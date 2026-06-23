@@ -39,7 +39,7 @@ Takes a dict with:
 Dynamically calculates safe truncation to ensure total name length <= 63 chars.
 */}}
 {{- define "cupboard.resourceName" -}}
-{{- $fullname := include "cupboard.fullname" .context }}
+{{- $fullname := include ( printf "%s.%s" .context.Chart.Name "fullname" ) .context }}
 {{- $suffix := .suffix }}
 {{- $maxLen := sub 62 (len $suffix) | int }}
 {{- if gt (len $fullname) $maxLen }}
@@ -47,6 +47,34 @@ Dynamically calculates safe truncation to ensure total name length <= 63 chars.
 {{- else }}
 {{- printf "%s-%s" $fullname $suffix | trunc 63 | trimSuffix "-" }}
 {{- end }}
+{{- end }}
+
+
+{{/*
+Create chart name and version as used by the chart label.
+*/}}
+{{- define "cupboard.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Common labels
+*/}}
+{{- define "cupboard.labels" -}}
+helm.sh/chart: {{ include ( printf "%s.%s" .Chart.Name "chart" ) . }}
+{{ include ( printf "%s.%s" .Chart.Name "selectorLabels" ) . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Selector labels
+*/}}
+{{- define "cupboard.selectorLabels" -}}
+app.kubernetes.io/name: {{ include ( printf "%s.%s" .Chart.Name "name" ) . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
@@ -58,6 +86,6 @@ Otherwise, use the standard resourceName helper with "controller-manager" suffix
 {{- if and (not (.Values.serviceAccount.enable | default true)) .Values.serviceAccount.name }}
 {{- .Values.serviceAccount.name }}
 {{- else }}
-{{- include "cupboard.resourceName" (dict "suffix" "controller-manager" "context" .) }}
+{{- include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "controller-manager" "context" .) }}
 {{- end }}
 {{- end }}
