@@ -467,9 +467,37 @@
           return esc(fallback.toUpperCase());
         };
         const sourceBadgeHTML = (source) => {
+          if (!source) return `<span class="fc-source"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Config</span>`;
           if (source === "forecastleapp") return `<span class="fc-source"><i class="fa-solid fa-cubes" aria-hidden="true"></i> Forecastle</span>`;
           if (source === "bookmarkgroup") return `<span class="fc-source"><i class="fa-solid fa-cube" aria-hidden="true"></i> CRD</span>`;
-          return `<span class="fc-source"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Config</span>`;
+          // InfoTile source is raw HTML — render as-is
+          return `<span class="fc-source">${source}</span>`;
+        };
+        const tileCardHTML = (tile) => {
+          const name = tile.name || "";
+          const url = tile.url || "";
+          const target = tile.target || "_self";
+          const content = tile.content || "";
+          const source = tile.source
+            ? `<span class="fc-source">${tile.source}</span>`
+            : `<span class="fc-source"><i class="fa-solid fa-chart-bar" aria-hidden="true"></i> InfoTile</span>`;
+          const mainTag = url
+            ? `<a class="fc-card-main" href="${esc(url)}" target="${esc(target)}" rel="noreferrer">`
+            : `<div class="fc-card-main">`;
+          const mainClose = url ? `</a>` : `</div>`;
+          const openLink = url
+            ? `<a class="fc-open" href="${esc(url)}" target="_blank" rel="noreferrer" aria-label="Open in new tab"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>`
+            : "";
+          return `
+            <article class="fc-card fc-tile" data-search="${esc(name.toLowerCase())}">
+              ${mainTag}
+                <span class="fc-card-icon"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></span>
+                <h3 class="fc-card-title">${esc(name)}</h3>
+                <div class="fc-tile-content">${content}</div>
+              ${mainClose}
+              <div class="fc-card-actions">${source}${openLink}</div>
+            </article>
+          `;
         };
         const linkCardHTML = (link) => {
           const target = link.target || "_self";
@@ -510,25 +538,31 @@
             return;
           }
           statusNode.closest(".fc-group").remove();
-          groupsNode.innerHTML = groups.map((group) => `
+          groupsNode.innerHTML = groups.map((group) => {
+            const links = Array.isArray(group.links) ? group.links : [];
+            const groupTiles = Array.isArray(group.tiles) ? group.tiles : [];
+            const count = links.length + groupTiles.length;
+            return `
             <section class="fc-group">
               <details open>
                 <summary class="fc-group-summary">
                   <span class="fc-group-meta">
                     <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
                     <h2 class="fc-group-name">${esc(group.name || "")}</h2>
-                    <span class="fc-group-count">${Array.isArray(group.links) ? group.links.length : 0}</span>
+                    <span class="fc-group-count">${count}</span>
                   </span>
                   <i class="fa-solid fa-chevron-down fc-group-chevron" aria-hidden="true"></i>
                 </summary>
                 <div class="fc-group-panel">
                   <div class="fc-cards">
-                    ${(Array.isArray(group.links) ? group.links : []).map(linkCardHTML).join("")}
+                    ${links.map(linkCardHTML).join("")}
+                    ${groupTiles.map(tileCardHTML).join("")}
                   </div>
                 </div>
               </details>
             </section>
-          `).join("");
+            `;
+          }).join("");
           filterCards();
           lastRefreshAt = Date.now();
           if (!filterListenerAttached) {

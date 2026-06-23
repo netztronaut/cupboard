@@ -1,0 +1,41 @@
+{{define "tile"}}
+<article class="fc-card fc-tile" data-search="{{lower .Name}}">
+  {{if .URL}}
+  <a class="fc-card-main" href="{{.URL}}" target="{{if .Target}}{{.Target}}{{else}}_self{{end}}" rel="noreferrer">
+  {{else}}
+  <div class="fc-card-main">
+  {{end}}
+    <span class="fc-card-icon">
+      {{if .Icon}}
+        {{if isFontAwesomeKey .Icon}}
+          <i class="fa-brands {{.Icon}}" aria-hidden="true"></i>
+        {{else if iconAssetURL .Icon}}
+          <img class="fc-card-icon-image" src="{{iconAssetURL .Icon}}" alt="" />
+        {{else}}
+          {{initial .Name}}
+        {{end}}
+      {{else}}
+        <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+      {{end}}
+    </span>
+    <h3 class="fc-card-title">{{.Name}}</h3>
+    <div class="fc-tile-content">{{.Content | safeHTML}}</div>
+  {{if .URL}}
+  </a>
+  {{else}}
+  </div>
+  {{end}}
+  <div class="fc-card-actions">
+    {{if .Source}}
+      <span class="fc-source">{{.Source | safeHTML}}</span>
+    {{else}}
+      <span class="fc-source"><i class="fa-solid fa-chart-bar" aria-hidden="true"></i> InfoTile</span>
+    {{end}}
+    {{if .URL}}
+    <a class="fc-open" href="{{.URL}}" target="_blank" rel="noreferrer" aria-label="Open in new tab">
+      <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+    </a>
+    {{end}}
+  </div>
+</article>
+{{end}}

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"netztronaut.de/cupboard/internal/foreigncluster"
 )
 
 // Handler wraps the main HTTP mux and exposes the dashboard collector so callers
@@ -32,7 +34,7 @@ func (h *Handler) NewSyncHandler() http.Handler {
 	return newSyncHandler(h.collector)
 }
 
-func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier, syncClient *SyncClient) (*Handler, error) { //nolint:gocyclo
+func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier, syncClient *SyncClient, foreignClusters *foreigncluster.Manager) (*Handler, error) { //nolint:gocyclo
 	frontendFS, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, err
@@ -42,7 +44,7 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 		return nil, err
 	}
 	auth := newAuthService(options.Auth)
-	collector := newDashboardCollector(k8sClient, discovery, options, syncClient)
+	collector := newDashboardCollector(k8sClient, discovery, options, syncClient, foreignClusters)
 	collector.logMissingOptionalResources(context.Background())
 	pageTemplate, err := loadPageTemplate(options.Page.TemplateSet)
 	if err != nil {

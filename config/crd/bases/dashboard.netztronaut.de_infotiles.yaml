@@ -1,0 +1,173 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: infotiles.dashboard.netztronaut.de
+spec:
+  group: dashboard.netztronaut.de
+  names:
+    kind: InfoTile
+    listKind: InfoTileList
+    plural: infotiles
+    singular: infotile
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: InfoTile is the Schema for the infotiles API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of InfoTile
+            properties:
+              group:
+                description: |-
+                  Group is the dashboard group this tile belongs to.
+                  When omitted, the tile name is used as its own group.
+                type: string
+              httpRequest:
+                description: |-
+                  HTTPRequest describes how the controller should query a backend endpoint.
+                  When omitted, no HTTP fetch is performed and Processor may still be evaluated
+                  with an empty Response.
+                properties:
+                  body:
+                    description: Body is the request body sent for POST/PUT/PATCH
+                      requests.
+                    type: string
+                  headers:
+                    description: Headers are added to the HTTP request.
+                    items:
+                      description: InfoTileHeader is a single HTTP request header.
+                      properties:
+                        name:
+                          minLength: 1
+                          type: string
+                        value:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  method:
+                    description: Method is the HTTP method. Defaults to GET.
+                    enum:
+                    - GET
+                    - POST
+                    - PUT
+                    - PATCH
+                    - DELETE
+                    - HEAD
+                    type: string
+                  queryParams:
+                    description: QueryParams are appended to the URL as query parameters.
+                    items:
+                      description: InfoTileQueryParam is a single query-string parameter.
+                      properties:
+                        name:
+                          minLength: 1
+                          type: string
+                        value:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  url:
+                    description: URL is the endpoint to call.
+                    minLength: 1
+                    type: string
+                required:
+                - url
+                type: object
+              icon:
+                description: |-
+                  Icon identifies an icon for this tile.
+                  It can be a Font Awesome key (fa-*), an icon-set key (lucide:*, tabler:*, hero:*), or a URL.
+                maxLength: 2048
+                type: string
+              interval:
+                description: |-
+                  Interval controls how often the controller re-fetches httpRequest and re-renders the tile.
+                  Defaults to 60s.
+                type: string
+              name:
+                description: Name is the display name of this tile on the dashboard.
+                minLength: 1
+                type: string
+              processor:
+                description: |-
+                  Processor is a Helm-compatible (Sprig) template string evaluated after every fetch.
+                  The output is stored in status.content and rendered as raw HTML on the dashboard.
+                  Context variables:
+                    .Response.Code  — HTTP status code (int)
+                    .Response.Body  — raw response body (string)
+                    .Response.Data  — decoded JSON value when Content-Type is application/json, else nil
+                type: string
+              replicate:
+                description: Replicate controls whether this tile is included in the
+                  synchronisation API.
+                type: boolean
+              source:
+                description: |-
+                  Source is the raw HTML injected into the source badge area.
+                  When set it replaces the hardcoded source badge.
+                  The value is treated as safe HTML — only supply trusted content.
+                type: string
+              target:
+                description: Target controls where the URL is opened. Defaults to
+                  "_self".
+                type: string
+              url:
+                description: URL is an optional target URL opened when the user clicks
+                  the tile.
+                maxLength: 2048
+                type: string
+            required:
+            - name
+            type: object
+          status:
+            description: status defines the observed state of InfoTile
+            properties:
+              content:
+                description: |-
+                  Content is the rendered HTML output of the Processor template.
+                  It is injected verbatim into the dashboard tile body.
+                type: string
+              lastError:
+                description: |-
+                  LastError describes the most recent reconciliation error, if any.
+                  Cleared on the next successful cycle.
+                type: string
+              lastFetchedAt:
+                description: LastFetchedAt is the timestamp of the most recent successful
+                  fetch-and-render cycle.
+                format: date-time
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -67,6 +67,13 @@ spec:
                 description: Properties allows free-form metadata, compatible with
                   Forecastle.
                 type: object
+              replicate:
+                description: |-
+                  Replicate controls whether this bookmark's group is included in the
+                  synchronization API response served to peer cupboard instances.
+                  When true, the controller sets Replicate=true on the managed BookmarkGroup.
+                  When false (the default) the group is only visible on the local dashboard.
+                type: boolean
               target:
                 description: |-
                   Target controls where the URL is opened.

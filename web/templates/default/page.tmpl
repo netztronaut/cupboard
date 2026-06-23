@@ -70,11 +70,14 @@
             return;
           }
           statusNode.textContent = "";
-          groupsNode.innerHTML = groups.map((group) => `
+          groupsNode.innerHTML = groups.map((group) => {
+            const links = Array.isArray(group.links) ? group.links : [];
+            const groupTiles = Array.isArray(group.tiles) ? group.tiles : [];
+            return `
             <section class="group">
               <h2>${esc(group.name || "")}</h2>
               <ul>
-                ${(Array.isArray(group.links) ? group.links : []).map((link) => `
+                ${links.map((link) => `
                   <li>
                     <a href="${esc(link.url || "#")}" target="${esc(link.target || "_self")}" rel="noreferrer">
                       ${iconHTML(link.icon)}
@@ -82,9 +85,18 @@
                     </a>
                   </li>
                 `).join("")}
+                ${groupTiles.map((tile) => {
+                  const inner = `<strong>${esc(tile.name || "")}</strong>${tile.content ? `<div class="tile-content">${tile.content}</div>` : ""}`;
+                  const body = tile.url
+                    ? `<a href="${esc(tile.url)}" target="${esc(tile.target || "_self")}" rel="noreferrer">${inner}</a>`
+                    : inner;
+                  const source = tile.source ? `<small>${tile.source}</small>` : "";
+                  return `<li class="info-tile">${body}${source}</li>`;
+                }).join("")}
               </ul>
             </section>
-          `).join("");
+            `;
+          }).join("");
           lastRefreshAt = Date.now();
         };
         const scheduleRefresh = () => {

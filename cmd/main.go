@@ -57,6 +57,7 @@ import (
 	dashboardv1alpha1 "netztronaut.de/cupboard/api/dashboard/v1alpha1"
 	forecastlev1alpha1 "netztronaut.de/cupboard/api/forecastle/v1alpha1"
 	dashboardcontroller "netztronaut.de/cupboard/internal/controller/dashboard"
+	"netztronaut.de/cupboard/internal/foreigncluster"
 	webhookdashboardv1alpha1 "netztronaut.de/cupboard/internal/webhook/dashboard/v1alpha1"
 	"netztronaut.de/cupboard/web"
 	// +kubebuilder:scaffold:imports
@@ -137,6 +138,9 @@ func loadViperConfig(configFile string) (*viper.Viper, error) {
 	_ = v.BindEnv("sync.tls.key", "CUPBOARD_SYNC_TLS_KEY")
 	_ = v.BindEnv("sync.tls.authCert", "CUPBOARD_SYNC_TLS_AUTH_CERT")
 	_ = v.BindEnv("sync.tls.authKey", "CUPBOARD_SYNC_TLS_AUTH_KEY")
+	_ = v.BindEnv("fleet.trustStore", "CUPBOARD_FLEET_TRUST_STORE")
+	_ = v.BindEnv("fleet.kubeconfig", "CUPBOARD_FLEET_KUBECONFIG")
+	_ = v.BindEnv("fleet.clusters", "CUPBOARD_FLEET_CLUSTERS")
 
 	if strings.TrimSpace(configFile) == "" {
 		configFile = os.Getenv("CUPBOARD_CONFIG")
@@ -220,6 +224,9 @@ func main() {
 	var syncTLSKey string
 	var syncTLSAuthCert string
 	var syncTLSAuthKey string
+	var fleetTrustStore string
+	var fleetKubeconfig string
+	var fleetClustersFlag string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -241,18 +248,31 @@ func main() {
 	flag.BoolVar(&enableAuth, "enable-auth", enableAuth,
 		"If set, API authentication is enabled. Can also be controlled via ENABLE_AUTH env var.")
 	flag.BoolVar(&skipOIDCProbe, "skip-oidc-probe", skipOIDCProbe,
-		"If set, the startup probe of the OIDC well-known endpoint is skipped. Can also be controlled via SKIP_OIDC_PROBE env var.")
+		"If set, startup probe of OIDC well-known endpoint is skipped. Also: SKIP_OIDC_PROBE env var.")
 	flag.StringVar(&forecastleInstance, "forecastle-instance", "",
-		"Forecastle instance name used to filter ForecastleApp resources by spec.instance. Can also be controlled via CUPBOARD_FORECASTLE_INSTANCE env var.")
-	flag.StringVar(&configFile, "config", "", "Path to the cupboard configuration file (yaml/json/toml). Can also be set via CUPBOARD_CONFIG.")
-	flag.StringVar(&syncAddr, "sync-bind-address", ":8083", "The address the sync endpoint binds to. Leave empty to disable.")
-	flag.StringVar(&syncURLsFlag, "sync-urls", "", "Comma-separated list of peer URLs to synchronize with.")
-	flag.StringVar(&syncSRVRecordsFlag, "sync-srv-records", "", "Comma-separated list of DNS SRV record names for peer discovery.")
-	flag.StringVar(&syncTLSCA, "sync-tls-ca", "", "Path to CA certificate used to verify sync peers (trust store). When set with --sync-tls-cert/key, enables mTLS.")
-	flag.StringVar(&syncTLSCert, "sync-tls-cert", "", "Path to TLS certificate for the sync endpoint.")
-	flag.StringVar(&syncTLSKey, "sync-tls-key", "", "Path to TLS private key for the sync endpoint.")
-	flag.StringVar(&syncTLSAuthCert, "sync-tls-auth-cert", "", "Path to client certificate used when authenticating to sync peers. Defaults to --sync-tls-cert if unset.")
-	flag.StringVar(&syncTLSAuthKey, "sync-tls-auth-key", "", "Path to client private key used when authenticating to sync peers. Defaults to --sync-tls-key if unset.")
+		"Forecastle instance name to filter ForecastleApp resources. Also: CUPBOARD_FORECASTLE_INSTANCE.")
+	flag.StringVar(&configFile, "config", "",
+		"Path to cupboard configuration file (yaml/json/toml). Also: CUPBOARD_CONFIG.")
+	flag.StringVar(&syncAddr, "sync-bind-address", ":8083",
+		"Address the sync endpoint binds to. Leave empty to disable.")
+	flag.StringVar(&syncURLsFlag, "sync-urls", "",
+		"Comma-separated list of peer URLs to synchronize with.")
+	flag.StringVar(&syncSRVRecordsFlag, "sync-srv-records", "",
+		"Comma-separated list of DNS SRV record names for peer discovery.")
+	flag.StringVar(&syncTLSCA, "sync-tls-ca", "",
+		"CA certificate to verify sync peers. With --sync-tls-cert/key enables mTLS.")
+	flag.StringVar(&syncTLSCert, "sync-tls-cert", "", "TLS certificate for the sync endpoint.")
+	flag.StringVar(&syncTLSKey, "sync-tls-key", "", "TLS private key for the sync endpoint.")
+	flag.StringVar(&syncTLSAuthCert, "sync-tls-auth-cert", "",
+		"Client certificate for authenticating to sync peers. Defaults to --sync-tls-cert.")
+	flag.StringVar(&syncTLSAuthKey, "sync-tls-auth-key", "",
+		"Client private key for authenticating to sync peers. Defaults to --sync-tls-key.")
+	flag.StringVar(&fleetTrustStore, "fleet-trust-store", "",
+		"PEM CA bundle to verify foreign cluster API server certificates. Also: CUPBOARD_FLEET_TRUST_STORE.")
+	flag.StringVar(&fleetKubeconfig, "fleet-kubeconfig", "",
+		"Kubeconfig file for kubeconfig-context cluster entries. Also: CUPBOARD_FLEET_KUBECONFIG.")
+	flag.StringVar(&fleetClustersFlag, "fleet-clusters", "",
+		"Foreign clusters to ingest as endpoint=auth-method pairs (comma-separated). Also: CUPBOARD_FLEET_CLUSTERS.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -287,6 +307,8 @@ func main() {
 	syncTLSKey = resolveStringFlag(config, setFlags, "sync-tls-key", "sync.tls.key", syncTLSKey)
 	syncTLSAuthCert = resolveStringFlag(config, setFlags, "sync-tls-auth-cert", "sync.tls.authCert", syncTLSAuthCert)
 	syncTLSAuthKey = resolveStringFlag(config, setFlags, "sync-tls-auth-key", "sync.tls.authKey", syncTLSAuthKey)
+	fleetTrustStore = resolveStringFlag(config, setFlags, "fleet-trust-store", "fleet.trustStore", fleetTrustStore)
+	fleetKubeconfig = resolveStringFlag(config, setFlags, "fleet-kubeconfig", "fleet.kubeconfig", fleetKubeconfig)
 
 	// URLs and SRV records may be arrays in the config file or comma-separated in flags.
 	var syncURLs []string
@@ -300,6 +322,13 @@ func main() {
 		syncSRVRecords = splitCommaFlag(syncSRVRecordsFlag)
 	} else if config.IsSet("sync.srvRecords") {
 		syncSRVRecords = config.GetStringSlice("sync.srvRecords")
+	}
+
+	var fleetClusterEntries []string
+	if setFlags["fleet-clusters"] {
+		fleetClusterEntries = splitCommaFlag(fleetClustersFlag)
+	} else if config.IsSet("fleet.clusters") {
+		fleetClusterEntries = config.GetStringSlice("fleet.clusters")
 	}
 
 	localTesting := config.GetBool("localTesting")
@@ -515,6 +544,25 @@ func main() {
 		}
 	}
 
+	var fleetManager *foreigncluster.Manager
+	if len(fleetClusterEntries) > 0 {
+		fleetConfigs, parseErr := foreigncluster.ParseClusterList(fleetClusterEntries)
+		if parseErr != nil {
+			setupLog.Error(parseErr, "Failed to parse fleet cluster list")
+			os.Exit(1)
+		}
+		caPool, caErr := foreigncluster.LoadFleetCAPool(fleetTrustStore)
+		if caErr != nil {
+			setupLog.Error(caErr, "Failed to load fleet trust store")
+			os.Exit(1)
+		}
+		fleetManager = foreigncluster.NewManager(fleetConfigs, caPool, fleetKubeconfig, scheme)
+		if err := mgr.Add(fleetManager); err != nil {
+			setupLog.Error(err, "Failed to add fleet manager runnable")
+			os.Exit(1)
+		}
+	}
+
 	webHandler, err := web.NewHandler(mgr.GetClient(), discoveryClient, web.Options{
 		Auth: web.AuthOptions{
 			Enabled:             enableAuth,
@@ -536,7 +584,7 @@ func main() {
 			FaviconURL:    firstNonEmpty(config.GetString("page.faviconURL"), config.GetString("web.faviconURL")),
 			ContentLayout: firstNonEmpty(config.GetString("page.contentLayout"), config.GetString("web.contentLayout")),
 		},
-	}, notifier, syncClient)
+	}, notifier, syncClient, fleetManager)
 	if err != nil {
 		setupLog.Error(err, "Failed to initialize embedded web interface")
 		os.Exit(1)
@@ -620,6 +668,15 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dashboard-bookmark")
+		os.Exit(1)
+	}
+
+	if err := (&dashboardcontroller.InfoTileReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Notify: notifier.Notify,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "dashboard-infotile")
 		os.Exit(1)
 	}
 	// nolint:goconst

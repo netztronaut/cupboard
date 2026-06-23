@@ -5,6 +5,9 @@
     {{range .Links}}
       {{template "link" .}}
     {{end}}
+    {{range .Tiles}}
+      {{template "tile" .}}
+    {{end}}
   </ul>
 </section>
 {{end}}

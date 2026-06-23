@@ -91,6 +91,7 @@ rules:
   resources:
   - bookmarkgroups
   - bookmarks
+  - infotiles
   verbs:
   - create
   - delete
@@ -104,6 +105,7 @@ rules:
   resources:
   - bookmarkgroups/finalizers
   - bookmarks/finalizers
+  - infotiles/finalizers
   verbs:
   - update
 - apiGroups:
@@ -111,6 +113,7 @@ rules:
   resources:
   - bookmarkgroups/status
   - bookmarks/status
+  - infotiles/status
   verbs:
   - get
   - patch

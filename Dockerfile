@@ -1,3 +1,11 @@
+# Build the frontend
+FROM node:22-alpine AS frontend
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --prefer-offline
+COPY web/ ./
+RUN npm run build
+
 # Build the manager binary
 FROM golang:1.26 AS builder
 ARG TARGETOS
@@ -13,6 +21,8 @@ RUN go mod download
 
 # Copy the Go source (relies on .dockerignore to filter)
 COPY . .
+# Bring in the compiled frontend so the embed directive finds web/dist/
+COPY --from=frontend /web/dist ./web/dist
 
 # Build
 # the GOARCH has no default value to allow the binary to be built according to the host where the command

@@ -5,7 +5,7 @@
       <span class="fc-group-meta">
         <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
         <h2 class="fc-group-name">{{.Name}}</h2>
-        <span class="fc-group-count">{{len .Links}}</span>
+        <span class="fc-group-count">{{len .Links}}{{if .Tiles}}+{{len .Tiles}}{{end}}</span>
       </span>
       <i class="fa-solid fa-chevron-down fc-group-chevron" aria-hidden="true"></i>
     </summary>
@@ -13,6 +13,9 @@
       <div class="fc-cards">
         {{range .Links}}
           {{template "link" .}}
+        {{end}}
+        {{range .Tiles}}
+          {{template "tile" .}}
         {{end}}
       </div>
     </div>
