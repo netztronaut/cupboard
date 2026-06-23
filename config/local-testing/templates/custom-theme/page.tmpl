@@ -5,6 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{.Title}}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/logo.svg" />
     {{if .FaviconURL}}<link rel="icon" href="{{.FaviconURL}}" />{{end}}
     <link rel="stylesheet" href="/static/fontawesome/css/fontawesome.min.css" />
     <link rel="stylesheet" href="/static/fontawesome/css/brands.min.css" />
@@ -52,8 +53,6 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        background: #0f172a;
-        color: #fff;
         font-size: .9rem;
       }
       .fc-brand-title {
@@ -288,10 +287,7 @@
         background: #111827;
         border-bottom-color: #334155;
       }
-      :root[data-theme="dark"] .fc-brand-mark {
-        background: #e2e8f0;
-        color: #111827;
-      }
+
       :root[data-theme="dark"] .fc-search input {
         border-color: #334155;
         color: #e2e8f0;
