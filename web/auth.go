@@ -152,7 +152,7 @@ func normalizedGroups(raw interface{}) []string {
 			}
 		}
 	case string:
-		for _, group := range strings.Split(value, ",") {
+		for group := range strings.SplitSeq(value, ",") {
 			add(group)
 		}
 	}
@@ -366,11 +366,6 @@ func (a *authService) clearSessionCookie(w http.ResponseWriter) {
 	})
 }
 
-func userInfoFromContext(ctx context.Context) (map[string]interface{}, bool) {
-	session, ok := ctx.Value(authContextKey{}).(authSession)
-	return session.UserInfo, ok
-}
-
 func authSessionFromContext(ctx context.Context) (authSession, bool) {
 	session, ok := ctx.Value(authContextKey{}).(authSession)
 	return session, ok
@@ -504,10 +499,3 @@ func requestBaseURL(r *http.Request) string {
 	return scheme + "://" + host
 }
 
-func isAbsoluteHTTPURL(raw string) bool {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	return parsed.Scheme == schemeHTTP || parsed.Scheme == schemeHTTPS
-}

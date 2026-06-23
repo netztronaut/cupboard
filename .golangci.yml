@@ -45,6 +45,13 @@ linters:
           - dupl
           - lll
         path: internal/*
+      - linters:
+          - dupl
+          - lll
+        path: web/*
+      - linters:
+          - lll
+        path: cmd/*
     paths:
       - third_party$
       - builtin$

@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -135,7 +136,7 @@ func (s *SyncClient) fetchFromPeer(ctx context.Context, peerURL string) (Dashboa
 	if err != nil {
 		return DashboardResponse{}, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		return DashboardResponse{}, fmt.Errorf("peer returned HTTP %d", resp.StatusCode)
 	}
@@ -151,9 +152,7 @@ func (s *SyncClient) GetRemoteData() map[string]DashboardResponse {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make(map[string]DashboardResponse, len(s.cache))
-	for k, v := range s.cache {
-		result[k] = v
-	}
+	maps.Copy(result, s.cache)
 	return result
 }
 

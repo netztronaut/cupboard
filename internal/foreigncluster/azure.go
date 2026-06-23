@@ -91,7 +91,7 @@ func (s *azureWITokenSource) exchangeToken() (string, time.Time, error) {
 
 	resp, err := s.httpClient.PostForm(tokenEndpoint, body)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("Azure token request failed: %w", err)
+		return "", time.Time{}, fmt.Errorf("azure token request failed: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
@@ -110,10 +110,10 @@ func (s *azureWITokenSource) exchangeToken() (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("parsing Azure token response: %w", err)
 	}
 	if result.Error != "" {
-		return "", time.Time{}, fmt.Errorf("Azure token error %s: %s", result.Error, result.Description)
+		return "", time.Time{}, fmt.Errorf("azure token error %s: %s", result.Error, result.Description)
 	}
 	if result.AccessToken == "" {
-		return "", time.Time{}, fmt.Errorf("Azure token response contained no access_token")
+		return "", time.Time{}, fmt.Errorf("azure token response contained no access_token")
 	}
 	expiresIn := result.ExpiresIn
 	if expiresIn <= 0 {

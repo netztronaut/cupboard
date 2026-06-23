@@ -707,9 +707,9 @@ func main() {
 // whenever a resource that affects the dashboard changes. Must be called before mgr.Start().
 func setupDashboardWatches(mgr ctrl.Manager, notifier *web.DashboardNotifier, dc *discovery.DiscoveryClient) {
 	notify := toolscache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ interface{}) { notifier.Notify() },
-		UpdateFunc: func(_, _ interface{}) { notifier.Notify() },
-		DeleteFunc: func(_ interface{}) { notifier.Notify() },
+		AddFunc:    func(_ any) { notifier.Notify() },
+		UpdateFunc: func(_, _ any) { notifier.Notify() },
+		DeleteFunc: func(_ any) { notifier.Notify() },
 	}
 
 	addWatch := func(obj ctrlclient.Object) {

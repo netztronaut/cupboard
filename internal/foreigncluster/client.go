@@ -98,10 +98,10 @@ func buildKubeconfigRESTConfig(cfg ClusterConfig, caPool *x509.CertPool, kubecon
 	// We may need to carry over a client certificate from the kubeconfig.
 	if caPool != nil {
 		var clientCert *tls.Certificate
-		if len(restCfg.TLSClientConfig.CertData) > 0 && len(restCfg.TLSClientConfig.KeyData) > 0 {
+		if len(restCfg.CertData) > 0 && len(restCfg.KeyData) > 0 {
 			cert, loadErr := tls.X509KeyPair(
-				restCfg.TLSClientConfig.CertData,
-				restCfg.TLSClientConfig.KeyData,
+				restCfg.CertData,
+				restCfg.KeyData,
 			)
 			if loadErr != nil {
 				return nil, fmt.Errorf("cluster %s: loading kubeconfig client certificate: %w", cfg.Endpoint, loadErr)
