@@ -8,7 +8,6 @@ web:
 page:
   templateSet: "default"
   title: "Cup-Board - wieder alle Tassen im Schrank"
-  faviconURL: "/favicon.svg"
   contentLayout: "grid"
 
 auth:

@@ -160,13 +160,14 @@ setup-kind: setup-hosts ## Set up a K3D cluster for LOCAL_TESTING if it does not
 	else \
 		echo "Creating K3D cluster '$(LOCAL_TESTING_KIND_CLUSTER)'..."; \
 		$(K3D) cluster create $(LOCAL_TESTING_KIND_CLUSTER) --port "80:80@loadbalancer" --port "443:443@loadbalancer" --k3s-arg="--disable=traefik@server:0"; \
-		echo "Provide kubeconfig"; \
-		$(K3D) kubeconfig get $(LOCAL_TESTING_KIND_CLUSTER) > kubeconfig.yaml; \
 		echo "Waiting for control-plane node to be ready..."; \
+		$(K3D) kubeconfig get $(LOCAL_TESTING_KIND_CLUSTER) > kubeconfig.yaml; \
 		KUBECONFIG=kubeconfig.yaml $(KUBECTL) wait --for=condition=Ready node/$(LOCAL_TESTING_KIND_CLUSTER)-control-plane --timeout=120s --context $(LOCAL_TESTING_KIND_CONTEXT); \
 		echo "Installing CRDs..."; \
 		KUBECONFIG=kubeconfig.yaml $(KUBECTL) apply -f config/crd/bases/ --context $(LOCAL_TESTING_KIND_CONTEXT); \
 	fi
+	@echo "Updating kubeconfig..."; \
+	$(K3D) kubeconfig get $(LOCAL_TESTING_KIND_CLUSTER) > kubeconfig.yaml
 	@echo "Installing Traefik..."
 	@KUBECONFIG=kubeconfig.yaml $(HELM) repo add traefik https://traefik.github.io/charts --force-update
 	@KUBECONFIG=kubeconfig.yaml $(HELM) repo update
