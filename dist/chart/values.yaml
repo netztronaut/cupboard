@@ -9,14 +9,14 @@
 ## Configure the controller manager deployment
 ##
 manager:
-  ## Set to false to skip manager installation
+  ## Set to false skips manager installation
   ##
   enabled: true
 
   replicas: 1
 
   image:
-    repository: docker.io/netztronaut/cupboard
+    repository: netztronaut/cupboard
     ## Image tag (defaults to Chart.appVersion if not set)
     ##
     # tag: ""
@@ -195,3 +195,5 @@ webhook:
 ##
 prometheus:
   enable: false
+
+additionalResources: []

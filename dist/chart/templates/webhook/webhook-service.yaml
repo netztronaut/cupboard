@@ -3,18 +3,14 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/name: {{ include "cupboard.name" . }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-  name: {{ include "cupboard.resourceName" (dict "suffix" "webhook-service" "context" $) }}
-  namespace: {{ .Release.Namespace }}
+    {{- include ( printf "%s.%s" .Chart.Name "labels" ) . | nindent 4 }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "webhook-service" "context" $) }}
 spec:
   ports:
   - port: 443
     protocol: TCP
     targetPort: {{ .Values.webhook.port }}
   selector:
-    app.kubernetes.io/name: {{ include "cupboard.name" . }}
+    app.kubernetes.io/name: {{ include ( printf "%s.%s" .Chart.Name "name" ) . }}
     control-plane: controller-manager
 {{- end }}

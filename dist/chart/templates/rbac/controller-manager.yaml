@@ -3,10 +3,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   labels:
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/name: {{ include "cupboard.name" . }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include ( printf "%s.%s" .Chart.Name "labels" ) . | nindent 4 }}
     {{- with .Values.serviceAccount.labels }}
     {{- with omit . "app.kubernetes.io/managed-by" "app.kubernetes.io/name" "helm.sh/chart" "app.kubernetes.io/instance" }}
     {{- toYaml . | nindent 4 }}
@@ -16,6 +13,5 @@ metadata:
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  name: {{ include "cupboard.serviceAccountName" . }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "serviceAccountName" ) . }}
 {{- end }}

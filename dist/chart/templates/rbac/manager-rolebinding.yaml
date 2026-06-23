@@ -2,17 +2,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   labels:
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/name: {{ include "cupboard.name" . }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-  name: {{ include "cupboard.resourceName" (dict "suffix" "manager-rolebinding" "context" $) }}
-  namespace: {{ .Release.Namespace }}
+    {{- include ( printf "%s.%s" .Chart.Name "labels" ) . | nindent 4 }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "manager-rolebinding" "context" $) }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "cupboard.resourceName" (dict "suffix" "manager-role" "context" $) }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "manager-role" "context" $) }}
 subjects:
 - kind: ServiceAccount
-  name: {{ include "cupboard.serviceAccountName" . }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "serviceAccountName" ) . }}
