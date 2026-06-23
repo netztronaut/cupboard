@@ -34,7 +34,7 @@ func (h *Handler) NewSyncHandler() http.Handler {
 	return newSyncHandler(h.collector)
 }
 
-func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier, syncClient *SyncClient, foreignClusters *foreigncluster.Manager) (*Handler, error) {
+func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options Options, notifier *DashboardNotifier, syncClient *SyncClient, foreignClusters *foreigncluster.Manager) (*Handler, error) { //nolint:gocyclo
 	frontendFS, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, err

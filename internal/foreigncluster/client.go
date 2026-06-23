@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // bearerTokenRoundTripper injects a Bearer token from an azureWITokenSource into
@@ -50,8 +50,8 @@ func tlsTransport(caPool *x509.CertPool, clientCert *tls.Certificate) http.Round
 		tlsCfg.Certificates = []tls.Certificate{*clientCert}
 	}
 	return &http.Transport{
-		TLSClientConfig:     tlsCfg,
-		MaxIdleConnsPerHost: 25,
+		TLSClientConfig:       tlsCfg,
+		MaxIdleConnsPerHost:   25,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
 }

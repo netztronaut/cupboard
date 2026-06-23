@@ -197,7 +197,7 @@ func (a *authService) serveOpenIDConfiguration(w http.ResponseWriter, r *http.Re
 			if readErr != nil {
 				return readErr
 			}
-			defer resp.Body.Close()
+			defer resp.Body.Close() //nolint:errcheck
 
 			var payload map[string]interface{}
 			if err := json.Unmarshal(body, &payload); err != nil {
@@ -279,7 +279,7 @@ func (a *authService) fetchUserInfo(ctx context.Context, token string) (map[stri
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode >= http.StatusBadRequest {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("userinfo request failed with %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -319,7 +319,7 @@ func (a *authService) userInfoEndpoint(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode >= http.StatusBadRequest {
 		return "", fmt.Errorf("oidc discovery failed with %d", resp.StatusCode)
 	}
@@ -466,7 +466,7 @@ func isReachable(ctx context.Context, httpClient *http.Client, rawURL string) bo
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
@@ -479,6 +479,9 @@ func oidcDiscoveryURL(issuerURL string) string {
 	return strings.TrimRight(issuerURL, "/") + "/.well-known/openid-configuration"
 }
 
+const schemeHTTPS = "https"
+const schemeHTTP = "http"
+
 func requestBaseURL(r *http.Request) string {
 	scheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
 	if parts := strings.SplitN(scheme, ",", 2); len(parts) > 0 {
@@ -486,9 +489,9 @@ func requestBaseURL(r *http.Request) string {
 	}
 	if scheme == "" {
 		if r.TLS != nil {
-			scheme = "https"
+			scheme = schemeHTTPS
 		} else {
-			scheme = "http"
+			scheme = schemeHTTP
 		}
 	}
 	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
@@ -506,5 +509,5 @@ func isAbsoluteHTTPURL(raw string) bool {
 	if err != nil {
 		return false
 	}
-	return parsed.Scheme == "http" || parsed.Scheme == "https"
+	return parsed.Scheme == schemeHTTP || parsed.Scheme == schemeHTTPS
 }
