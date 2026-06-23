@@ -145,7 +145,7 @@ type InfoTile struct {
 
 	// metadata is a standard object metadata
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitzero"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// spec defines the desired state of InfoTile
 	// +required
@@ -153,7 +153,7 @@ type InfoTile struct {
 
 	// status defines the observed state of InfoTile
 	// +optional
-	Status InfoTileStatus `json:"status,omitzero"`
+	Status InfoTileStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -161,7 +161,7 @@ type InfoTile struct {
 // InfoTileList contains a list of InfoTile
 type InfoTileList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitzero"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []InfoTile `json:"items"`
 }
 

@@ -4,6 +4,7 @@
 resources:
 - bases/dashboard.netztronaut.de_bookmarkgroups.yaml
 - bases/dashboard.netztronaut.de_bookmarks.yaml
+- bases/dashboard.netztronaut.de_infotiles.yaml
 - bases/forecastle.stakater.com_forecastleapps.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
