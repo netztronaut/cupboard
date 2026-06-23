@@ -89,7 +89,7 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 		echo "K3D cluster '$(KIND_CLUSTER)' already exists. Skipping creation."; \
 	else \
 		echo "Creating K3D cluster '$(KIND_CLUSTER)'..."; \
-		$(K3D) cluster create --name $(KIND_CLUSTER); \
+		$(K3D) cluster create $(KIND_CLUSTER); \
 	fi
 
 .PHONY: test-e2e
@@ -99,7 +99,7 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the K3D cluster used for e2e tests
-	@$(K3D) cluster delete --name $(KIND_CLUSTER)
+	@$(K3D) cluster delete $(KIND_CLUSTER)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
