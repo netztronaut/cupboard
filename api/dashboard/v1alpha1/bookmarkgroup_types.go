@@ -22,11 +22,6 @@ import (
 
 // BookmarkGroupSpec defines the desired state of BookmarkGroup
 type BookmarkGroupSpec struct {
-	// Name is the display name for this group in the dashboard.
-	// When omitted, metadata.name is used.
-	// +optional
-	Name string `json:"name,omitempty"`
-
 	// Properties allows free-form metadata for this group, compatible with Forecastle.
 	// +optional
 	Properties map[string]string `json:"properties,omitempty"`
@@ -64,15 +59,15 @@ type BookmarkGroup struct {
 
 	// metadata is a standard object metadata
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitzero"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// spec defines the desired state of BookmarkGroup
-	// +required
-	Spec BookmarkGroupSpec `json:"spec"`
+	// +optional
+	Spec BookmarkGroupSpec `json:"spec,omitempty"`
 
 	// status defines the observed state of BookmarkGroup
 	// +optional
-	Status BookmarkGroupStatus `json:"status,omitzero"`
+	Status BookmarkGroupStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -80,6 +75,6 @@ type BookmarkGroup struct {
 // BookmarkGroupList contains a list of BookmarkGroup
 type BookmarkGroupList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitzero"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []BookmarkGroup `json:"items"`
 }

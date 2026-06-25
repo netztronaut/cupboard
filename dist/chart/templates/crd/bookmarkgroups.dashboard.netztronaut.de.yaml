@@ -43,7 +43,9 @@ spec:
             description: spec defines the desired state of BookmarkGroup
             properties:
               links:
-                description: Links are the dashboard entries shown under this group.
+                description: |-
+                  Links are the dashboard entries shown under this group.
+                  When omitted or empty, the group is created but contains no links.
                 items:
                   description: BookmarkLink describes a link entry rendered in the
                     dashboard.
@@ -150,15 +152,13 @@ spec:
                   required:
                   - name
                   type: object
-                minItems: 1
                 type: array
-              name:
+              replicate:
                 description: |-
-                  Name is the display name for this group in the dashboard.
-                  When omitted, metadata.name is used.
-                type: string
-            required:
-            - links
+                  Replicate controls whether this group and its links are included in the
+                  synchronization API response served to peer cupboard instances.
+                  When false (the default) the group is only visible on the local dashboard.
+                type: boolean
             type: object
           status:
             description: status defines the observed state of BookmarkGroup
@@ -234,8 +234,6 @@ spec:
                 format: int32
                 type: integer
             type: object
-        required:
-        - spec
         type: object
     served: true
     storage: true

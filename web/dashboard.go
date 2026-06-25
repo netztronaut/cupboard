@@ -486,10 +486,7 @@ func collectBookmarkGroups(ctx context.Context, c client.Reader, groups map[stri
 	}
 	groupReplicate := make(map[string]bool)
 	for _, item := range groupList.Items {
-		groupName := strings.TrimSpace(item.Spec.Name)
-		if groupName == "" {
-			groupName = item.Name
-		}
+		groupName := item.Name
 		ensureLinkGroup(groupDetails, groupName)
 		// Overwrite with full metadata from the BookmarkGroup spec.
 		existing := groupDetails[groupName]

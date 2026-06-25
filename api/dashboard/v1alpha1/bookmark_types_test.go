@@ -111,16 +111,12 @@ func TestBookmarkLinkTargetConstants(t *testing.T) {
 
 func TestBookmarkGroupSpec(t *testing.T) {
 	spec := BookmarkGroupSpec{
-		Name: "Test Group",
 		Properties: map[string]string{
 			"team": "platform",
 			"env":  "prod",
 		},
 	}
 
-	if spec.Name != "Test Group" {
-		t.Errorf("expected name 'Test Group', got %q", spec.Name)
-	}
 	if len(spec.Properties) != 2 {
 		t.Errorf("expected 2 properties, got %d", len(spec.Properties))
 	}
@@ -141,20 +137,8 @@ func TestBookmarkGroupStatus(t *testing.T) {
 	}
 }
 
-func TestBookmarkGroupSpecWithNameOnly(t *testing.T) {
-	spec := BookmarkGroupSpec{
-		Name: "Name Only Group",
-	}
-
-	if spec.Name != "Name Only Group" {
-		t.Errorf("expected name 'Name Only Group', got %q", spec.Name)
-	}
-}
-
 func TestBookmarkGroupSpecNilProperties(t *testing.T) {
-	spec := BookmarkGroupSpec{
-		Name: "Nil Properties Group",
-	}
+	spec := BookmarkGroupSpec{}
 
 	if spec.Properties != nil {
 		t.Errorf("expected nil properties, got %v", spec.Properties)

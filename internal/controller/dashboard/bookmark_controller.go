@@ -48,7 +48,7 @@ type BookmarkReconciler struct {
 // +kubebuilder:rbac:groups=dashboard.netztronaut.de,namespace=cupboard-system,resources=bookmarks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dashboard.netztronaut.de,namespace=cupboard-system,resources=bookmarks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dashboard.netztronaut.de,namespace=cupboard-system,resources=bookmarks/finalizers,verbs=update
-// +kubebuilder:rbac:groups=dashboard.netztronaut.de,namespace=cupboard-system,resources=bookmarkgroups,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=dashboard.netztronaut.de,namespace=cupboard-system,resources=bookmarkgroups,verbs=get;list;watch
 
 func (r *BookmarkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -59,46 +59,6 @@ func (r *BookmarkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
-	}
-
-	groupName := bookmark.Spec.Group
-
-	var group dashboardv1alpha1.BookmarkGroup
-	err := r.Get(ctx, client.ObjectKey{
-		Namespace: bookmark.Namespace,
-		Name:      groupName,
-	}, &group)
-
-	if errors.IsNotFound(err) {
-		group = dashboardv1alpha1.BookmarkGroup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      groupName,
-				Namespace: bookmark.Namespace,
-			},
-			Spec: dashboardv1alpha1.BookmarkGroupSpec{
-				Replicate: bookmark.Spec.Replicate,
-			},
-		}
-		if err := r.Create(ctx, &group); err != nil {
-			log.Error(err, "Failed to create BookmarkGroup", "groupName", groupName)
-			return ctrl.Result{}, err
-		}
-		log.Info("Created BookmarkGroup dynamically", "groupName", groupName)
-	} else if err != nil {
-		log.Error(err, "Failed to get BookmarkGroup", "groupName", groupName)
-		return ctrl.Result{}, err
-	} else if bookmark.Spec.Replicate != group.Spec.Replicate {
-		// A Bookmark turning replicate on/off should propagate to its group,
-		// but only when this is the sole Bookmark that owns the group.  When
-		// other Bookmarks share the same group we leave Replicate as-is —
-		// any Bookmark setting it to true takes precedence.
-		if bookmark.Spec.Replicate || !anyOtherBookmarkReplicates(ctx, r.Client, bookmark, groupName) {
-			group.Spec.Replicate = bookmark.Spec.Replicate
-			if err := r.Update(ctx, &group); err != nil {
-				log.Error(err, "Failed to update BookmarkGroup Replicate", "groupName", groupName)
-				return ctrl.Result{}, err
-			}
-		}
 	}
 
 	// Check URL reachability if due.
@@ -213,23 +173,4 @@ func (r *BookmarkReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&dashboardv1alpha1.Bookmark{}).
 		Named("dashboard-bookmark").
 		Complete(r)
-}
-
-// anyOtherBookmarkReplicates returns true if any Bookmark other than the given
-// one in the same namespace shares the groupName and has Replicate=true.
-// Used to avoid lowering Replicate on a group that another Bookmark still wants replicated.
-func anyOtherBookmarkReplicates(ctx context.Context, c client.Reader, self dashboardv1alpha1.Bookmark, groupName string) bool {
-	var list dashboardv1alpha1.BookmarkList
-	if err := c.List(ctx, &list, client.InNamespace(self.Namespace)); err != nil {
-		return false
-	}
-	for _, b := range list.Items {
-		if b.Name == self.Name {
-			continue
-		}
-		if b.Spec.Group == groupName && b.Spec.Replicate {
-			return true
-		}
-	}
-	return false
 }

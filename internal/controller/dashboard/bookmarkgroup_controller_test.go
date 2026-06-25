@@ -51,9 +51,7 @@ var _ = Describe("BookmarkGroup Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					Spec: dashboardv1alpha1.BookmarkGroupSpec{
-						Name: "Test",
-					},
+					Spec: dashboardv1alpha1.BookmarkGroupSpec{},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
