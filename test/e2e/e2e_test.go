@@ -52,9 +52,42 @@ var _ = Describe("Manager", Ordered, func() {
 	// enforce the restricted security policy to the namespace, installing CRDs,
 	// and deploying the controller.
 	BeforeAll(func() {
+		// ---- cluster, image, cert-manager ---------------------------------------
+
+		clusterName := utils.DefaultK3dClusterName()
+		clusterCreated, err := utils.EnsureK3dCluster(clusterName)
+		Expect(err).NotTo(HaveOccurred(), "Failed to ensure k3d cluster")
+		cleanupKubeconfig, err := utils.SetupK3dKubeconfig(clusterName)
+		Expect(err).NotTo(HaveOccurred(), "Failed to set up kubeconfig")
+		if clusterCreated {
+			DeferCleanup(func() { utils.DeleteK3dCluster(clusterName) })
+		}
+		DeferCleanup(cleanupKubeconfig)
+
+		By("building manager image")
+		_, err = utils.Run(exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage)))
+		Expect(err).NotTo(HaveOccurred(), "Failed to build manager image")
+		By("loading manager image into cluster")
+		Expect(utils.LoadImageToKindClusterWithName(managerImage)).To(Succeed(), "Failed to load manager image")
+
+		certManagerInstalled := false
+		if !utils.IsCertManagerCRDsInstalled() {
+			By("installing cert-manager")
+			Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install cert-manager")
+			certManagerInstalled = true
+		}
+		DeferCleanup(func() {
+			if certManagerInstalled {
+				By("uninstalling cert-manager")
+				utils.UninstallCertManager()
+			}
+		})
+
+		// ---- namespace / CRD / controller ---------------------------------------
+
 		By("creating manager namespace")
 		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
+		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
 
 		By("labeling the namespace to enforce the restricted security policy")

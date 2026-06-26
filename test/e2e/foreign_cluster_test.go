@@ -237,12 +237,7 @@ func freePort() (int, error) {
 
 // ---- naming helpers ----------------------------------------------------------
 
-func k3dBinary() string {
-	if v := os.Getenv("K3D"); v != "" {
-		return v
-	}
-	return "k3d"
-}
+func k3dBinary() string { return utils.K3dBinary() }
 
 func serverContainer(cluster string) string { return "k3d-" + cluster + "-server-0" }
 func dockerNetwork(cluster string) string   { return "k3d-" + cluster }
@@ -449,13 +444,20 @@ var _ = Describe("ForeignCluster", Ordered, Label("fleet"), func() {
 		fc.fleetKubeconfig = make(map[string]string, len(fcClusters))
 		fc.pf = make(map[string]*portForwarder, len(fcClusters))
 
-		// ---- 1. Create all four k3d clusters ---------------------------------
-		// DeferCleanup is registered immediately after each successful creation
-		// so the cluster is deleted even if BeforeAll fails partway through or
-		// the test run is interrupted.
+		// ---- 1. Build image and create all four k3d clusters ------------------
+		// Build the manager image before creating clusters so the image exists
+		// for import.  DeferCleanup is registered immediately after each
+		// successful cluster creation so the cluster is deleted even if
+		// BeforeAll fails partway through or the test run is interrupted.
+
+		By("building manager image")
+		_, err = utils.Run(exec.Command("make", "docker-build", "IMG="+managerImage))
+		Expect(err).NotTo(HaveOccurred(), "Failed to build manager image")
 
 		for _, c := range fcClusters {
 			c := c
+			By("removing any leftover k3d cluster " + c)
+			_, _ = runK3d("cluster", "delete", c)
 			By("creating k3d cluster " + c)
 			_, err = runK3d("cluster", "create", c)
 			Expect(err).NotTo(HaveOccurred(), "cluster %s", c)

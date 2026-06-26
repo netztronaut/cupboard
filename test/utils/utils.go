@@ -34,6 +34,8 @@ const (
 
 	defaultKindBinary  = "kind"
 	defaultKindCluster = "kind"
+	defaultK3dCluster  = "cupboard-test-e2e"
+	k3dK3sImage        = "rancher/k3s:v1.36.1-k3s1"
 )
 
 func warnError(err error) {
@@ -160,24 +162,80 @@ func IsCertManagerCRDsInstalled() bool {
 	return false
 }
 
+// K3dBinary returns the k3d binary path, honouring the K3D env var.
+func K3dBinary() string {
+	if v, ok := os.LookupEnv("K3D"); ok && v != "" {
+		return v
+	}
+	return "k3d"
+}
+
+// DefaultK3dClusterName returns the test cluster name, honouring KIND_CLUSTER env var.
+func DefaultK3dClusterName() string {
+	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok && v != "" {
+		return v
+	}
+	return defaultK3dCluster
+}
+
+// EnsureK3dCluster creates a k3d cluster with the given name if it does not already
+// exist and KUBECONFIG is not pre-set (pre-set KUBECONFIG implies an external cluster).
+// Returns true when the cluster was newly created.
+func EnsureK3dCluster(name string) (bool, error) {
+	if os.Getenv("KUBECONFIG") != "" {
+		return false, nil
+	}
+	out, _ := Run(exec.Command(K3dBinary(), "cluster", "list"))
+	if strings.Contains(out, name) {
+		return false, nil
+	}
+	if _, err := Run(exec.Command(K3dBinary(), "cluster", "create", name, "--image", k3dK3sImage)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// SetupK3dKubeconfig writes the named cluster's kubeconfig to a temp file, sets
+// KUBECONFIG, and returns a cleanup function that deletes the file and restores the
+// previous value.  When KUBECONFIG is already set the function is a no-op.
+func SetupK3dKubeconfig(clusterName string) (func(), error) {
+	if prev := os.Getenv("KUBECONFIG"); prev != "" {
+		return func() {}, nil
+	}
+	out, err := Run(exec.Command(K3dBinary(), "kubeconfig", "write", clusterName))
+	if err != nil {
+		return nil, err
+	}
+	kubeconfigPath := strings.TrimSpace(out)
+	if err := os.Setenv("KUBECONFIG", kubeconfigPath); err != nil {
+		return nil, err
+	}
+	return func() {
+		_ = os.Unsetenv("KUBECONFIG")
+		_ = os.Remove(kubeconfigPath)
+	}, nil
+}
+
+// DeleteK3dCluster deletes a k3d cluster, ignoring errors.
+func DeleteK3dCluster(name string) {
+	_, _ = Run(exec.Command(K3dBinary(), "cluster", "delete", name))
+}
+
 // LoadImageToKindClusterWithName loads a local docker image to the kind or k3d cluster
 func LoadImageToKindClusterWithName(name string) error {
-	cluster := defaultKindCluster
-	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
-		cluster = v
+	cluster := DefaultK3dClusterName()
+	cmd := exec.Command(K3dBinary(), "image", "import", name, "--cluster", cluster)
+	_, err := Run(cmd)
+	if err == nil {
+		return nil
 	}
-	// Prefer k3d when K3D env var is set
-	if k3dBinary, ok := os.LookupEnv("K3D"); ok && k3dBinary != "" {
-		cmd := exec.Command(k3dBinary, "image", "import", name, "--cluster", cluster)
-		_, err := Run(cmd)
-		return err
-	}
+	// Fallback to kind
 	kindBinary := defaultKindBinary
 	if v, ok := os.LookupEnv("KIND"); ok {
 		kindBinary = v
 	}
-	cmd := exec.Command(kindBinary, "load", "docker-image", name, "--name", cluster)
-	_, err := Run(cmd)
+	cmd = exec.Command(kindBinary, "load", "docker-image", name, "--name", cluster)
+	_, err = Run(cmd)
 	return err
 }
 

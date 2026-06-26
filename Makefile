@@ -80,7 +80,7 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 KIND_CLUSTER ?= cupboard-test-e2e
 
 .PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
+setup-test-e2e: ## Manually create the K3D cluster used for e2e tests (optional; tests create it automatically)
 	@command -v $(K3D) >/dev/null 2>&1 || { \
 		echo "K3D is not installed. Please install K3D manually."; \
 		exit 1; \
@@ -89,36 +89,28 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 		echo "K3D cluster '$(KIND_CLUSTER)' already exists. Skipping creation."; \
 	else \
 		echo "Creating K3D cluster '$(KIND_CLUSTER)'..."; \
-		$(K3D) cluster create $(KIND_CLUSTER) --image=rancher/k3s:v1.36.1-k3s1;  \
+		$(K3D) cluster create $(KIND_CLUSTER) --image=rancher/k3s:v1.36.1-k3s1; \
 	fi
 	@$(K3D) kubeconfig merge $(KIND_CLUSTER) --kubeconfig-merge-default
 
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using K3D.
-	K3D=$(K3D) KIND_CLUSTER=$(KIND_CLUSTER) KUBECONFIG=$$( $(K3D) kubeconfig write $(KIND_CLUSTER) ) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m
-	$(MAKE) cleanup-test-e2e
+test-e2e: manifests generate fmt vet ## Run the e2e tests (cluster is created/deleted automatically).
+	go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m
 
 .PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the K3D cluster used for e2e tests
+cleanup-test-e2e: ## Manually tear down the K3D cluster used for e2e tests
 	@$(K3D) cluster delete $(KIND_CLUSTER)
 
 .PHONY: test-e2e-lifecycle
-test-e2e-lifecycle: setup-test-e2e manifests generate fmt vet ## Run the lifecycle e2e tests (Bookmark/BookmarkGroup/routing resources).
-	K3D=$(K3D) KIND_CLUSTER=$(KIND_CLUSTER) KUBECONFIG=$$( $(K3D) kubeconfig write $(KIND_CLUSTER) ) go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.label-filter=lifecycle -timeout 20m
-	$(MAKE) cleanup-test-e2e
+test-e2e-lifecycle: manifests generate fmt vet ## Run the lifecycle e2e tests (cluster is created/deleted automatically).
+	go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.label-filter=lifecycle -timeout 20m
 
-
-test-e2e-fleet: manifests generate fmt vet ## Run the foreign-cluster (fleet) e2e tests using four k3d clusters (full-mesh).
-	@command -v $(K3D) >/dev/null 2>&1 || { \
-		echo "K3D is not installed. Please install K3D manually."; \
-		exit 1; \
-	}
-	$(MAKE) cleanup-test-e2e-fleet 2>/dev/null || true
-	K3D=$(K3D) SKIP_KIND_IMAGE_LOAD=true CERT_MANAGER_INSTALL_SKIP=true go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.label-filter=fleet -timeout 30m; \
-		RET=$$?; $(MAKE) cleanup-test-e2e-fleet 2>/dev/null || true; exit $$RET
+.PHONY: test-e2e-fleet
+test-e2e-fleet: manifests generate fmt vet ## Run the foreign-cluster (fleet) e2e tests (clusters are created/deleted automatically).
+	go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.label-filter=fleet -timeout 30m
 
 .PHONY: cleanup-test-e2e-fleet
-cleanup-test-e2e-fleet: ## Tear down the four k3d clusters used for fleet e2e tests
+cleanup-test-e2e-fleet: ## Manually tear down the four k3d clusters used for fleet e2e tests
 	@$(K3D) cluster delete cupboard-e2e-alpha cupboard-e2e-beta cupboard-e2e-gamma cupboard-e2e-delta 2>/dev/null || true
 	@docker network rm k3d-cupboard-e2e-alpha k3d-cupboard-e2e-beta k3d-cupboard-e2e-gamma k3d-cupboard-e2e-delta 2>/dev/null || true
 

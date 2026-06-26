@@ -27,11 +27,10 @@ limitations under the License.
 //
 // Tests exercise:
 //  1. Bookmark → API group named after spec.group
-//  2. BookmarkGroup with spec.name → group display name comes from spec.name
-//  3. Same as (2) but in a different namespace
-//  4. Multiple bookmarks across multiple groups
-//  5. Bookmark with unreachable URL → status reflects the failure; not returned by API
-//  6. Annotated routing resources → all appear in the dashboard API
+//  2. BookmarkGroup and Bookmark in a different namespace
+//  3. Multiple bookmarks across multiple groups
+//  4. Bookmark with unreachable URL → status reflects the failure; not returned by API
+//  5. Annotated routing resources → all appear in the dashboard API
 package e2e
 
 import (
@@ -85,13 +84,44 @@ var lc struct {
 var _ = Describe("Lifecycle", Ordered, Label("lifecycle"), func() {
 
 	BeforeAll(func() {
+		// ---- 0. Cluster, image, cert-manager -----------------------------------
+
+		clusterName := utils.DefaultK3dClusterName()
+		clusterCreated, err := utils.EnsureK3dCluster(clusterName)
+		Expect(err).NotTo(HaveOccurred(), "Failed to ensure k3d cluster")
+		cleanupKubeconfig, err := utils.SetupK3dKubeconfig(clusterName)
+		Expect(err).NotTo(HaveOccurred(), "Failed to set up kubeconfig")
+		if clusterCreated {
+			DeferCleanup(func() { utils.DeleteK3dCluster(clusterName) })
+		}
+		DeferCleanup(cleanupKubeconfig)
+
+		By("building manager image")
+		_, err = utils.Run(exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage)))
+		Expect(err).NotTo(HaveOccurred(), "Failed to build manager image")
+		By("loading manager image into cluster")
+		Expect(utils.LoadImageToKindClusterWithName(managerImage)).To(Succeed(), "Failed to load manager image")
+
+		certManagerInstalled := false
+		if !utils.IsCertManagerCRDsInstalled() {
+			By("installing cert-manager")
+			Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install cert-manager")
+			certManagerInstalled = true
+		}
+		DeferCleanup(func() {
+			if certManagerInstalled {
+				By("uninstalling cert-manager")
+				utils.UninstallCertManager()
+			}
+		})
+
 		// ---- 1. Create manager namespace with restricted pod-security ----------
 		By("creating manager namespace")
 		cmd := exec.Command("kubectl", "create", "ns", lcNS)
 		_, _ = utils.Run(cmd) // ignore error if it already exists
 		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", lcNS,
 			"pod-security.kubernetes.io/enforce=restricted")
-		_, err := utils.Run(cmd)
+		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace")
 
 		DeferCleanup(func() {

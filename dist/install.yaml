@@ -47,11 +47,6 @@ spec:
           spec:
             description: spec defines the desired state of BookmarkGroup
             properties:
-              name:
-                description: |-
-                  Name is the display name for this group in the dashboard.
-                  When omitted, metadata.name is used.
-                type: string
               properties:
                 additionalProperties:
                   type: string
@@ -140,8 +135,6 @@ spec:
                 format: date-time
                 type: string
             type: object
-        required:
-        - spec
         type: object
     served: true
     storage: true
