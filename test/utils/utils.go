@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,7 +36,8 @@ const (
 	defaultKindBinary  = "kind"
 	defaultKindCluster = "kind"
 	defaultK3dCluster  = "cupboard-test-e2e"
-	k3dK3sImage        = "rancher/k3s:v1.36.1-k3s1"
+	// K3sImage is the k3s image used for all test clusters.
+	K3sImage = "rancher/k3s:v1.36.1-k3s1"
 )
 
 func warnError(err error) {
@@ -189,7 +191,7 @@ func EnsureK3dCluster(name string) (bool, error) {
 	if strings.Contains(out, name) {
 		return false, nil
 	}
-	if _, err := Run(exec.Command(K3dBinary(), "cluster", "create", name, "--image", k3dK3sImage)); err != nil {
+	if _, err := Run(exec.Command(K3dBinary(), "cluster", "create", name, "--image", K3sImage)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -266,14 +268,25 @@ func GetNonEmptyLines(output string) []string {
 	return res
 }
 
-// GetProjectDir will return the directory where the project is
+// GetProjectDir will return the directory where the project is by walking up
+// the directory tree until it finds a go.mod file.
 func GetProjectDir() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return wd, fmt.Errorf("failed to get current working directory: %w", err)
 	}
-	wd = strings.ReplaceAll(wd, "/test/e2e", "")
-	return wd, nil
+	dir := wd
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return wd, fmt.Errorf("could not find project root (go.mod) from %s", wd)
 }
 
 // UncommentCode searches for target in the file and remove the comment prefix

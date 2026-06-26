@@ -17,7 +17,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package e2e tests the foreign-cluster (fleet) feature end-to-end.
+// Package fleet_test tests the foreign-cluster (fleet) feature end-to-end.
 //
 // Four k3d clusters are created in each test run:
 //   - cupboard-e2e-alpha   ("alpha")
@@ -54,24 +54,20 @@ limitations under the License.
 //  7. Service replication     – annotated Services replicate the same way as Ingresses
 //  8. Graceful degradation    – a cluster's dashboard returns HTTP 200 when one peer is
 //                               unreachable; remaining peers' resources still appear
-package e2e
+package fleet_test
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"netztronaut.de/cupboard/test/e2e/helpers"
 	"netztronaut.de/cupboard/test/utils"
 )
 
@@ -109,7 +105,7 @@ var fc struct {
 	// insecure TLS) written into each cluster's fleet Secret.
 	fleetKubeconfig map[string]string
 	// pf holds the auto-restarting port-forwarder for each cluster's dashboard.
-	pf     map[string]*portForwarder
+	pf     map[string]*helpers.PortForwarder
 	tmpDir string
 }
 
@@ -119,120 +115,6 @@ var fc struct {
 type peerSpec struct {
 	endpoint string // https://k3d-<cluster>-server-0:6443
 	context  string // k3d-<cluster>
-}
-
-// dashboardResponse is the minimal subset of web.DashboardResponse used by tests.
-type dashboardResponse struct {
-	Groups []struct {
-		Name   string `json:"name"`
-		Source string `json:"source"`
-		Links  []struct {
-			Name   string `json:"name"`
-			URL    string `json:"url"`
-			Source string `json:"source"`
-		} `json:"links"`
-	} `json:"groups"`
-}
-
-// ---- port-forward ------------------------------------------------------------
-
-// portForwarder keeps a kubectl port-forward process alive by restarting it
-// whenever it exits.  It exposes the dashboard API via a local Go HTTP client.
-type portForwarder struct {
-	kubeconfig string
-	namespace  string
-	service    string
-	remotePort int
-	localPort  int
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
-	client *http.Client
-}
-
-// newPortForwarder allocates a free local port and starts the background
-// goroutine that keeps kubectl port-forward alive.
-func newPortForwarder(kubeconfig, namespace, service string, remotePort int) (*portForwarder, error) {
-	localPort, err := freePort()
-	if err != nil {
-		return nil, fmt.Errorf("finding free port: %w", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	pf := &portForwarder{
-		kubeconfig: kubeconfig,
-		namespace:  namespace,
-		service:    service,
-		remotePort: remotePort,
-		localPort:  localPort,
-		ctx:        ctx,
-		cancel:     cancel,
-		client:     &http.Client{Timeout: 120 * time.Second},
-	}
-	pf.wg.Add(1)
-	go pf.loop()
-	return pf, nil
-}
-
-// loop restarts kubectl port-forward whenever it exits until the context is
-// cancelled.
-func (pf *portForwarder) loop() {
-	defer pf.wg.Done()
-	for {
-		cmd := exec.CommandContext(pf.ctx, "kubectl",
-			"--kubeconfig", pf.kubeconfig,
-			"port-forward",
-			"-n", pf.namespace,
-			"svc/"+pf.service,
-			fmt.Sprintf("%d:%d", pf.localPort, pf.remotePort),
-		)
-		// Discard output; failures are surfaced via HTTP errors to callers.
-		_ = cmd.Run()
-		select {
-		case <-pf.ctx.Done():
-			return
-		case <-time.After(2 * time.Second):
-			// Brief pause before restart to avoid tight-looping when the pod
-			// is not yet ready.
-		}
-	}
-}
-
-// close stops the port-forward goroutine and waits for it to exit.
-func (pf *portForwarder) close() {
-	pf.cancel()
-	pf.wg.Wait()
-}
-
-// fetchDashboard calls /api/dashboard via the local port and returns the
-// decoded response.
-func (pf *portForwarder) fetchDashboard() (dashboardResponse, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/api/dashboard", pf.localPort)
-	resp, err := pf.client.Get(url) //nolint:noctx
-	if err != nil {
-		return dashboardResponse{}, fmt.Errorf("GET %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return dashboardResponse{}, fmt.Errorf("GET %s: HTTP %d", url, resp.StatusCode)
-	}
-	var dr dashboardResponse
-	if err := json.NewDecoder(resp.Body).Decode(&dr); err != nil {
-		return dashboardResponse{}, fmt.Errorf("decode response from %s: %w", url, err)
-	}
-	return dr, nil
-}
-
-// freePort returns an available TCP port on localhost.
-func freePort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port, nil
 }
 
 // ---- naming helpers ----------------------------------------------------------
@@ -368,11 +250,11 @@ spec:
 
 // ---- test helpers ------------------------------------------------------------
 
-func fetchDashboard(cluster string) (dashboardResponse, error) {
-	return fc.pf[cluster].fetchDashboard()
+func fetchDashboard(cluster string) (helpers.DashboardResponse, error) {
+	return fc.pf[cluster].FetchDashboard()
 }
 
-func findLinks(resp dashboardResponse, pred func(group, name, url, source string) bool) []struct {
+func findLinks(resp helpers.DashboardResponse, pred func(group, name, url, source string) bool) []struct {
 	Group, Name, URL, Source string
 } {
 	var out []struct{ Group, Name, URL, Source string }
@@ -386,7 +268,7 @@ func findLinks(resp dashboardResponse, pred func(group, name, url, source string
 	return out
 }
 
-func countLinks(resp dashboardResponse, name string) int {
+func countLinks(resp helpers.DashboardResponse, name string) int {
 	return len(findLinks(resp, func(_, n, _, _ string) bool { return n == name }))
 }
 
@@ -442,7 +324,7 @@ var _ = Describe("ForeignCluster", Ordered, Label("fleet"), func() {
 
 		fc.kubeconfig = make(map[string]string, len(fcClusters))
 		fc.fleetKubeconfig = make(map[string]string, len(fcClusters))
-		fc.pf = make(map[string]*portForwarder, len(fcClusters))
+		fc.pf = make(map[string]*helpers.PortForwarder, len(fcClusters))
 
 		// ---- 1. Build image and create all four k3d clusters ------------------
 		// Build the manager image before creating clusters so the image exists
@@ -459,7 +341,7 @@ var _ = Describe("ForeignCluster", Ordered, Label("fleet"), func() {
 			By("removing any leftover k3d cluster " + c)
 			_, _ = runK3d("cluster", "delete", c)
 			By("creating k3d cluster " + c)
-			_, err = runK3d("cluster", "create", c)
+			_, err = runK3d("cluster", "create", c, "--image", utils.K3sImage)
 			Expect(err).NotTo(HaveOccurred(), "cluster %s", c)
 			DeferCleanup(func() {
 				By("deleting k3d cluster " + c)
@@ -571,12 +453,12 @@ var _ = Describe("ForeignCluster", Ordered, Label("fleet"), func() {
 		for _, c := range fcClusters {
 			c := c
 			By("starting port-forward for " + c)
-			pf, err := newPortForwarder(fc.kubeconfig[c], fcNS, dashboardServiceName, 8082)
+			pf, err := helpers.NewPortForwarder(fc.kubeconfig[c], fcNS, dashboardServiceName, 8082)
 			Expect(err).NotTo(HaveOccurred(), "port-forwarder for %s", c)
 			fc.pf[c] = pf
 			DeferCleanup(func() {
 				By("stopping port-forward for " + c)
-				pf.close()
+				pf.Close()
 			})
 		}
 

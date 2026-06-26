@@ -17,7 +17,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package e2e tests the full resource lifecycle end-to-end.
+// Package lifecycle_test tests the full resource lifecycle end-to-end.
 //
 // The suite deploys the cupboard manager (auth disabled, watching all namespaces)
 // together with:
@@ -31,7 +31,7 @@ limitations under the License.
 //  3. Multiple bookmarks across multiple groups
 //  4. Bookmark with unreachable URL → status reflects the failure; not returned by API
 //  5. Annotated routing resources → all appear in the dashboard API
-package e2e
+package lifecycle_test
 
 import (
 	"fmt"
@@ -43,6 +43,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"netztronaut.de/cupboard/test/e2e/helpers"
 	"netztronaut.de/cupboard/test/utils"
 )
 
@@ -76,7 +77,7 @@ const (
 // ---- shared state ------------------------------------------------------------
 
 var lc struct {
-	pf *portForwarder
+	pf *helpers.PortForwarder
 }
 
 // ---- main test suite ---------------------------------------------------------
@@ -324,22 +325,22 @@ spec:
 		By("starting port-forwarder for dashboard API")
 		// Use the default kubeconfig (managed by the outer k3d setup).
 		kubeconfig := utils.DefaultKubeconfig()
-		pf, pfErr := newPortForwarder(kubeconfig, lcNS, lcWebSvc, 8082)
+		pf, pfErr := helpers.NewPortForwarder(kubeconfig, lcNS, lcWebSvc, 8082)
 		Expect(pfErr).NotTo(HaveOccurred(), "Failed to start port-forwarder")
 		// Use a short per-request timeout so the Eventually below can retry
 		// many times within its window (the default 120s timeout would
 		// allow only ~1 attempt in a 3-minute window).
-		pf.client = &http.Client{Timeout: 5 * time.Second}
+		pf.Client = &http.Client{Timeout: 5 * time.Second}
 		lc.pf = pf
 		DeferCleanup(func() {
 			By("stopping port-forwarder")
-			lc.pf.close()
+			lc.pf.Close()
 		})
 
 		// ---- 9. Wait for the dashboard API to become available --------------
 		By("waiting for the dashboard API to respond")
 		Eventually(func() error {
-			_, err := lc.pf.fetchDashboard()
+			_, err := lc.pf.FetchDashboard()
 			return err
 		}, 5*time.Minute, 3*time.Second).Should(Succeed(), "Dashboard API not available")
 	})
@@ -350,14 +351,14 @@ spec:
 	// ---- helpers -------------------------------------------------------------
 
 	// fetch calls the dashboard API and returns the response.
-	fetch := func(g Gomega) dashboardResponse {
-		dr, err := lc.pf.fetchDashboard()
+	fetch := func(g Gomega) helpers.DashboardResponse {
+		dr, err := lc.pf.FetchDashboard()
 		g.Expect(err).NotTo(HaveOccurred())
 		return dr
 	}
 
 	// groupNames returns the names of all groups in the response.
-	groupNames := func(dr dashboardResponse) []string {
+	groupNames := func(dr helpers.DashboardResponse) []string {
 		names := make([]string, 0, len(dr.Groups))
 		for _, g := range dr.Groups {
 			names = append(names, g.Name)
@@ -366,7 +367,7 @@ spec:
 	}
 
 	// linksInGroup returns the link names in a named group.
-	linksInGroup := func(dr dashboardResponse, groupName string) []string {
+	linksInGroup := func(dr helpers.DashboardResponse, groupName string) []string {
 		for _, g := range dr.Groups {
 			if g.Name == groupName {
 				names := make([]string, 0, len(g.Links))
@@ -380,7 +381,7 @@ spec:
 	}
 
 	// linkSource returns the source field of a link in a named group.
-	linkSource := func(dr dashboardResponse, groupName, linkName string) string {
+	linkSource := func(dr helpers.DashboardResponse, groupName, linkName string) string {
 		for _, g := range dr.Groups {
 			if g.Name != groupName {
 				continue
@@ -834,7 +835,7 @@ spec:
 			}, 3*time.Minute, 3*time.Second).Should(Succeed())
 
 			By("verifying link sources are set correctly")
-			dr, err := lc.pf.fetchDashboard()
+			dr, err := lc.pf.FetchDashboard()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(linkSource(dr, routeGroup, "My Ingress")).To(Equal("ingress"))
 			Expect(linkSource(dr, routeGroup, "My IngressRoute")).To(Equal("ingressroute"))

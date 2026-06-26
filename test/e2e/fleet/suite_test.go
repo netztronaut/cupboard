@@ -17,7 +17,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package e2e
+package fleet_test
 
 import (
 	"fmt"
@@ -26,30 +26,20 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"netztronaut.de/cupboard/test/e2e/helpers"
 )
 
-var (
-	// managerImage is the manager image built and loaded by each suite's BeforeAll.
-	managerImage = "example.com/cupboard:v0.0.1"
-)
+var managerImage = helpers.ManagerImage
 
-// TestE2E runs the e2e test suite to validate the solution in an isolated environment.
-// Each suite (Manager, Lifecycle, ForeignCluster) manages its own cluster lifecycle,
-// so any label-filtered subset can be run directly with go test -tags=e2e:
-//
-//	go test -tags=e2e ./test/e2e/                                  # all suites
-//	go test -tags=e2e ./test/e2e/ --ginkgo.label-filter=lifecycle  # lifecycle only
-//	go test -tags=e2e ./test/e2e/ --ginkgo.label-filter=fleet      # fleet only
-//
-// To use a pre-provisioned cluster, set KUBECONFIG before running; cluster
-// creation and deletion are skipped automatically.
+// TestFleet runs the foreign-cluster (fleet) e2e test suite.
 //
 // To enable kubectl kuberc (use custom kubectl configurations), set: KUBECTL_KUBERC=true
 // By default, kuberc is disabled to ensure consistent test behavior across different environments.
-func TestE2E(t *testing.T) {
+func TestFleet(t *testing.T) {
 	RegisterFailHandler(Fail)
-	_, _ = fmt.Fprintf(GinkgoWriter, "Starting cupboard e2e test suite\n")
-	RunSpecs(t, "e2e suite")
+	_, _ = fmt.Fprintf(GinkgoWriter, "Starting cupboard fleet e2e test suite\n")
+	RunSpecs(t, "fleet suite")
 }
 
 var _ = BeforeSuite(func() {

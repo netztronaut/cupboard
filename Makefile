@@ -95,19 +95,23 @@ setup-test-e2e: ## Manually create the K3D cluster used for e2e tests (optional;
 
 .PHONY: test-e2e
 test-e2e: manifests generate fmt vet ## Run the e2e tests (cluster is created/deleted automatically).
-	go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m
+	go test -tags=e2e -p 1 ./test/e2e/... -v -ginkgo.v -timeout 30m
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Manually tear down the K3D cluster used for e2e tests
 	@$(K3D) cluster delete $(KIND_CLUSTER)
 
+.PHONY: test-e2e-manager
+test-e2e-manager: manifests generate fmt vet ## Run the manager e2e tests (cluster is created/deleted automatically).
+	go test -tags=e2e ./test/e2e/manager/ -v -ginkgo.v -timeout 30m
+
 .PHONY: test-e2e-lifecycle
 test-e2e-lifecycle: manifests generate fmt vet ## Run the lifecycle e2e tests (cluster is created/deleted automatically).
-	go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.label-filter=lifecycle -timeout 20m
+	go test -tags=e2e ./test/e2e/lifecycle/ -v -ginkgo.v -timeout 20m
 
 .PHONY: test-e2e-fleet
 test-e2e-fleet: manifests generate fmt vet ## Run the foreign-cluster (fleet) e2e tests (clusters are created/deleted automatically).
-	go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.label-filter=fleet -timeout 30m
+	go test -tags=e2e ./test/e2e/fleet/ -v -ginkgo.v -timeout 30m
 
 .PHONY: cleanup-test-e2e-fleet
 cleanup-test-e2e-fleet: ## Manually tear down the four k3d clusters used for fleet e2e tests
