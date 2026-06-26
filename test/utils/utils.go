@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2" // nolint:revive,staticcheck
 )
@@ -95,9 +96,35 @@ func InstallCertManager() error {
 		"--namespace", "cert-manager",
 		"--timeout", "5m",
 	)
-
-	_, err := Run(cmd)
-	return err
+	if _, err := Run(cmd); err != nil {
+		return err
+	}
+	// Also wait for cainjector, which populates the caBundle in the webhook
+	// configuration.  Without this the API server cannot verify the webhook TLS
+	// certificate and all cert-manager resource creation fails with
+	// "x509: certificate signed by unknown authority".
+	cmd = exec.Command("kubectl", "wait", "deployment.apps/cert-manager-cainjector",
+		"--for", "condition=Available",
+		"--namespace", "cert-manager",
+		"--timeout", "5m",
+	)
+	if _, err := Run(cmd); err != nil {
+		return err
+	}
+	// Poll until the ValidatingWebhookConfiguration has a non-empty caBundle,
+	// confirming the cainjector has completed CA injection.
+	for range 60 {
+		cmd = exec.Command("kubectl", "get",
+			"validatingwebhookconfiguration/cert-manager-webhook",
+			"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
+		)
+		out, err := Run(cmd)
+		if err == nil && strings.TrimSpace(out) != "" {
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for cert-manager caBundle injection into ValidatingWebhookConfiguration")
 }
 
 // IsCertManagerCRDsInstalled checks if any Cert Manager CRDs are installed
@@ -152,6 +179,19 @@ func LoadImageToKindClusterWithName(name string) error {
 	cmd := exec.Command(kindBinary, "load", "docker-image", name, "--name", cluster)
 	_, err := Run(cmd)
 	return err
+}
+
+// DefaultKubeconfig returns the kubeconfig path to use for the active test cluster.
+// It honours the KUBECONFIG env var; when unset it falls back to ~/.kube/config.
+func DefaultKubeconfig() string {
+	if kc := os.Getenv("KUBECONFIG"); kc != "" {
+		return kc
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home + "/.kube/config"
 }
 
 // GetNonEmptyLines converts given command output string into individual objects

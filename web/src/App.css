@@ -62,6 +62,17 @@ h1 {
   color: #475569;
 }
 
+.splash-warning {
+  max-width: 28rem;
+  text-align: center;
+  padding: 0.6rem 1rem;
+  border: 1px solid #fbbf24;
+  border-radius: 0.5rem;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.875rem;
+}
+
 .error {
   color: #b91c1c;
 }

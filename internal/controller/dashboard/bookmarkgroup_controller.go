@@ -54,11 +54,24 @@ func (r *BookmarkGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	group.Status.LinkCount = int32(len(group.Spec.Links))
+	// Count Bookmarks that belong to this group.
+	var bookmarkList dashboardv1alpha1.BookmarkList
+	if err := r.List(ctx, &bookmarkList, client.InNamespace(group.Namespace)); err != nil {
+		log.Error(err, "Failed to list Bookmarks for group", "group", group.Name)
+		return ctrl.Result{}, err
+	}
+	bookmarkCount := int32(0)
+	for _, b := range bookmarkList.Items {
+		if b.Spec.Group == group.Name {
+			bookmarkCount++
+		}
+	}
+
+	group.Status.BookmarkCount = bookmarkCount
 	now := metav1.NewTime(time.Now())
 	group.Status.LastSyncedAt = &now
 	if err := r.Status().Update(ctx, &group); err != nil {
-		log.Error(err, "unable to update BookmarkGroup status")
+		log.Error(err, "Unable to update BookmarkGroup status")
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil

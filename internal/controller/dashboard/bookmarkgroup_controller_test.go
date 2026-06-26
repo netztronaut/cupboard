@@ -53,12 +53,6 @@ var _ = Describe("BookmarkGroup Controller", func() {
 					},
 					Spec: dashboardv1alpha1.BookmarkGroupSpec{
 						Name: "Test",
-						Links: []dashboardv1alpha1.BookmarkLink{
-							{
-								Name: "Kubernetes",
-								URL:  "https://kubernetes.io",
-							},
-						},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -88,7 +82,7 @@ var _ = Describe("BookmarkGroup Controller", func() {
 
 			updated := &dashboardv1alpha1.BookmarkGroup{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
-			Expect(updated.Status.LinkCount).To(Equal(int32(1)))
+			Expect(updated.Status.BookmarkCount).To(Equal(int32(0)))
 			Expect(updated.Status.LastSyncedAt).NotTo(BeNil())
 		})
 	})

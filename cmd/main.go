@@ -78,7 +78,11 @@ func init() {
 
 // setupCacheNamespaces configures the cache to watch specific namespace(s).
 // It supports both single namespace ("ns1") and multi-namespace ("ns1,ns2,ns3") formats.
+// When namespaces is empty, all namespaces are watched.
 func setupCacheNamespaces(namespaces string) cache.Options {
+	if namespaces == "" {
+		return cache.Options{}
+	}
 	defaultNamespaces := make(map[string]cache.Config)
 	for ns := range strings.SplitSeq(namespaces, ",") {
 		defaultNamespaces[strings.TrimSpace(ns)] = cache.Config{}
@@ -328,7 +332,9 @@ func main() {
 	if setFlags["fleet-clusters"] {
 		fleetClusterEntries = splitCommaFlag(fleetClustersFlag)
 	} else if config.IsSet("fleet.clusters") {
-		fleetClusterEntries = config.GetStringSlice("fleet.clusters")
+		// GetStringSlice wraps a plain string in []string{value} instead of
+		// splitting it; use GetString + splitCommaFlag to handle the env var case.
+		fleetClusterEntries = splitCommaFlag(config.GetString("fleet.clusters"))
 	}
 
 	localTesting := config.GetBool("localTesting")
@@ -337,10 +343,6 @@ func main() {
 		enableWebhooks = config.GetBool("enableWebhooks")
 	}
 	watchNamespace := strings.TrimSpace(config.GetString("watchNamespace"))
-	if watchNamespace == "" {
-		setupLog.Error(errors.New("WATCH_NAMESPACE must be set"), "Unable to get WATCH_NAMESPACE, the manager will watch and manage resources in all namespaces")
-		os.Exit(1)
-	}
 
 	var staticLinks []web.StaticLink
 	var linkGroups []web.LinkGroup
@@ -666,6 +668,12 @@ func main() {
 	if err := (&dashboardcontroller.BookmarkReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		HTTPClient: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+			},
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dashboard-bookmark")
 		os.Exit(1)
@@ -683,6 +691,10 @@ func main() {
 	if enableWebhooks {
 		if err := webhookdashboardv1alpha1.SetupBookmarkGroupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to create webhook", "webhook", "BookmarkGroup")
+			os.Exit(1)
+		}
+		if err := webhookdashboardv1alpha1.SetupBookmarkWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create webhook", "webhook", "Bookmark")
 			os.Exit(1)
 		}
 	}
@@ -754,10 +766,17 @@ func setupDashboardWatches(mgr ctrl.Manager, notifier *web.DashboardNotifier, dc
 		addWatch(u)
 	}
 
-	// Optional: TLSRoute (unstructured, CRD may not exist).
-	if resourceAvailable("gateway.networking.k8s.io/v1alpha2", "TLSRoute") {
+	// Optional: GRPCRoute (unstructured, CRD may not exist).
+	if resourceAvailable("gateway.networking.k8s.io/v1", "GRPCRoute") {
 		u := &unstructured.Unstructured{}
-		u.SetGroupVersionKind(schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1alpha2", Kind: "TLSRoute"})
+		u.SetGroupVersionKind(schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "GRPCRoute"})
+		addWatch(u)
+	}
+
+	// Optional: TLSRoute (unstructured, CRD may not exist).
+	if resourceAvailable("gateway.networking.k8s.io/v1", "TLSRoute") {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "TLSRoute"})
 		addWatch(u)
 	}
 

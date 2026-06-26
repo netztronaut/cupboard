@@ -26,6 +26,9 @@ func ResolveURLFromSource(ctx context.Context, c client.Reader, namespace string
 	if source.HTTPRouteRef != nil {
 		return resolveHTTPRouteURL(ctx, c, namespace, source.HTTPRouteRef.Name)
 	}
+	if source.GRPCRouteRef != nil {
+		return resolveGRPCRouteURL(ctx, c, namespace, source.GRPCRouteRef.Name)
+	}
 	if source.ServiceRef != nil {
 		return resolveServiceURL(ctx, c, namespace, source.ServiceRef.Name)
 	}
@@ -72,6 +75,28 @@ func resolveHTTPRouteURL(ctx context.Context, c client.Reader, namespace, name s
 		}
 	}
 	return "", fmt.Errorf("httpRouteRef %q has no hostnames", name)
+}
+
+func resolveGRPCRouteURL(ctx context.Context, c client.Reader, namespace, name string) (string, error) {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "gateway.networking.k8s.io",
+		Version: "v1",
+		Kind:    "GRPCRoute",
+	})
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, obj); err != nil {
+		return "", fmt.Errorf("grpcRouteRef %q: %w", name, err)
+	}
+	hostnames, _, err := unstructured.NestedStringSlice(obj.Object, "spec", "hostnames")
+	if err != nil {
+		return "", fmt.Errorf("grpcRouteRef %q: %w", name, err)
+	}
+	for _, hostname := range hostnames {
+		if strings.TrimSpace(hostname) != "" {
+			return "https://" + hostname, nil
+		}
+	}
+	return "", fmt.Errorf("grpcRouteRef %q has no hostnames", name)
 }
 
 func resolveServiceURL(ctx context.Context, c client.Reader, namespace, name string) (string, error) {

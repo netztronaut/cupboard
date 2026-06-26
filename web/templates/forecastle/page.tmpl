@@ -10,6 +10,15 @@
     <link rel="stylesheet" href="/static/fontawesome/css/fontawesome.min.css" />
     <link rel="stylesheet" href="/static/fontawesome/css/brands.min.css" />
     <link rel="stylesheet" href="/static/fontawesome/css/solid.min.css" />
+    <script>
+      (function () {
+        var stored = localStorage.getItem("cupboard-theme");
+        var valid = ["system", "light", "dark"];
+        var pref = valid.indexOf(stored) !== -1 ? stored : "system";
+        var isDark = pref === "dark" || (pref === "system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+      })();
+    </script>
     <style>
       :root { color-scheme: light; }
       :root[data-theme="dark"] { color-scheme: dark; }

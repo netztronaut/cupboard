@@ -45,6 +45,13 @@ spec:
                   The controller will dynamically create groups based on this field.
                 minLength: 1
                 type: string
+              groups:
+                description: |-
+                  Groups restricts this bookmark to users who belong to at least one listed group.
+                  When omitted, the bookmark is visible to every user.
+                items:
+                  type: string
+                type: array
               icon:
                 description: |-
                   Icon identifies an icon for this bookmark.
@@ -93,6 +100,16 @@ spec:
                   URLFrom resolves URL dynamically from Kubernetes resources.
                   Supports Forecastle-compatible source fields.
                 properties:
+                  grpcRouteRef:
+                    description: LocalObjectReference contains enough information
+                      to locate an object in the same namespace.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
                   httpRouteRef:
                     description: LocalObjectReference contains enough information
                       to locate an object in the same namespace.
@@ -217,6 +234,22 @@ spec:
                   this object.
                 format: date-time
                 type: string
+              lastURLCheckAt:
+                description: LastURLCheckAt is the timestamp of the most recent URL
+                  reachability check.
+                format: date-time
+                type: string
+              urlCheckError:
+                description: |-
+                  URLCheckError describes the error from the most recent failed reachability check.
+                  Cleared on the next successful check.
+                type: string
+              urlReachable:
+                description: |-
+                  URLReachable indicates whether the URL was reachable at the last check.
+                  Nil means the check has not yet been performed; the bookmark is withheld
+                  from the dashboard until the first successful check.
+                type: boolean
             type: object
         required:
         - spec

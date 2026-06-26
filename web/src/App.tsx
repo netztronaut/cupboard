@@ -3,10 +3,38 @@ import type { User } from 'oidc-client-ts'
 import './App.css'
 import { clearUserSession, currentUser, getAuthConfig, handleAuthCallback, loginWithPKCE } from './auth'
 
-const AUTO_SIGN_IN_FAILURE_LIMIT = 3
-const AUTO_SIGN_IN_FAILURE_COUNT_KEY = 'cupboard.auth.autoSignInFailures'
+const SIGN_IN_BACKOFF_KEY = 'cupboard.auth.signInBackoff'
+const SIGN_IN_ATTEMPT_KEY = 'cupboard.auth.signInAttempts'
+const SIGN_IN_BACKOFF_INITIAL_MS = 5_000
+const SIGN_IN_BACKOFF_MAX_MS = 60_000
 
 let autoSignInPromise: Promise<void> | undefined
+
+function getSignInBackoffMs(): number {
+  const raw = window.sessionStorage.getItem(SIGN_IN_BACKOFF_KEY)
+  const ms = Number.parseInt(raw ?? '', 10)
+  return Number.isFinite(ms) && ms > 0 ? ms : 0
+}
+
+function getSignInAttempts(): number {
+  const raw = window.sessionStorage.getItem(SIGN_IN_ATTEMPT_KEY)
+  const n = Number.parseInt(raw ?? '', 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function recordSignInFailure(): number {
+  const current = getSignInBackoffMs()
+  const next = current === 0 ? SIGN_IN_BACKOFF_INITIAL_MS : Math.min(current * 2, SIGN_IN_BACKOFF_MAX_MS)
+  window.sessionStorage.setItem(SIGN_IN_BACKOFF_KEY, String(next))
+  const attempts = getSignInAttempts() + 1
+  window.sessionStorage.setItem(SIGN_IN_ATTEMPT_KEY, String(attempts))
+  return next
+}
+
+function resetSignInBackoff() {
+  window.sessionStorage.removeItem(SIGN_IN_BACKOFF_KEY)
+  window.sessionStorage.removeItem(SIGN_IN_ATTEMPT_KEY)
+}
 
 type DashboardLink = {
   name: string
@@ -35,31 +63,6 @@ type DashboardResponse = {
   groups: DashboardGroup[]
 }
 
-function autoSignInFailureCount(): number {
-  const value = window.sessionStorage.getItem(AUTO_SIGN_IN_FAILURE_COUNT_KEY)
-  if (!value) {
-    return 0
-  }
-  const count = Number.parseInt(value, 10)
-  return Number.isFinite(count) && count > 0 ? count : 0
-}
-
-function recordAutoSignInFailure(): number {
-  const count = autoSignInFailureCount() + 1
-  window.sessionStorage.setItem(AUTO_SIGN_IN_FAILURE_COUNT_KEY, String(count))
-  return count
-}
-
-function resetAutoSignInFailures() {
-  window.sessionStorage.removeItem(AUTO_SIGN_IN_FAILURE_COUNT_KEY)
-}
-
-function autoSignInLoopError(): Error {
-  return new Error(
-    `automatic sign-in failed ${AUTO_SIGN_IN_FAILURE_LIMIT} times in a row; not redirecting again to avoid a sign-in loop`,
-  )
-}
-
 function App() {
   const [groups, setGroups] = useState<DashboardGroup[]>([])
   const [error, setError] = useState<string>()
@@ -67,6 +70,8 @@ function App() {
   const [subject, setSubject] = useState<string>()
   const [authEnabled, setAuthEnabled] = useState(true)
   const [wsEnabled, setWsEnabled] = useState(false)
+  const [retryIn, setRetryIn] = useState<number>()
+  const [signInAttempts, setSignInAttempts] = useState(() => getSignInAttempts())
 
   const fetchDashboard = async (token?: string) => {
     const response = await fetch('/api/dashboard', {
@@ -126,19 +131,30 @@ function App() {
   }
 
   const startAutomaticSignIn = async () => {
-    if (autoSignInFailureCount() >= AUTO_SIGN_IN_FAILURE_LIMIT) {
-      throw autoSignInLoopError()
-    }
-    if (autoSignInPromise) {
-      return autoSignInPromise
-    }
+    if (autoSignInPromise) return autoSignInPromise
+    const backoffMs = getSignInBackoffMs()
     autoSignInPromise = (async () => {
+      if (backoffMs > 0) {
+        let remaining = Math.ceil(backoffMs / 1000)
+        setRetryIn(remaining)
+        await new Promise<void>((resolve) => {
+          const interval = setInterval(() => {
+            remaining -= 1
+            if (remaining <= 0) {
+              clearInterval(interval)
+              setRetryIn(undefined)
+              resolve()
+            } else {
+              setRetryIn(remaining)
+            }
+          }, 1000)
+        })
+      }
       await loginWithPKCE()
     })().catch((err: unknown) => {
       autoSignInPromise = undefined
-      if (recordAutoSignInFailure() >= AUTO_SIGN_IN_FAILURE_LIMIT) {
-        throw autoSignInLoopError()
-      }
+      recordSignInFailure()
+      setSignInAttempts(getSignInAttempts())
       throw err
     })
     return autoSignInPromise
@@ -165,9 +181,7 @@ function App() {
             user = await handleAuthCallback()
           } catch {
             window.history.replaceState({}, '', '/')
-            if (recordAutoSignInFailure() >= AUTO_SIGN_IN_FAILURE_LIMIT) {
-              throw autoSignInLoopError()
-            }
+            recordSignInFailure()
             await startAutomaticSignIn()
             return
           }
@@ -181,20 +195,18 @@ function App() {
             await authenticateBackend(user)
           } catch {
             await clearUserSession()
-            if (recordAutoSignInFailure() >= AUTO_SIGN_IN_FAILURE_LIMIT) {
-              throw autoSignInLoopError()
-            }
+            recordSignInFailure()
             await startAutomaticSignIn()
             return
           }
-          resetAutoSignInFailures()
+          resetSignInBackoff()
           await fetchDashboard()
           setWsEnabled(true)
           return
         }
 
         if (await loadBackendSessionSubject()) {
-          resetAutoSignInFailures()
+          resetSignInBackoff()
           await fetchDashboard()
           setWsEnabled(true)
           return
@@ -275,7 +287,13 @@ function App() {
     return (
       <div className="splash">
         <h1>cupboard</h1>
-        <p>Loading…</p>
+        {retryIn !== undefined ? <p>Retrying sign-in in {retryIn}s…</p> : <p>Loading…</p>}
+        {signInAttempts >= 3 && (
+          <p className="splash-warning">
+            Sign-in is taking longer than expected. Please check that the identity provider is reachable and your
+            network connection is stable. Retrying automatically…
+          </p>
+        )}
       </div>
     )
   }

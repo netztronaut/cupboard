@@ -18,12 +18,8 @@ package v1alpha1
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"net/http"
 	"net/url"
-	"strings"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -45,12 +41,6 @@ func SetupBookmarkGroupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &dashboardv1alpha1.BookmarkGroup{}).
 		WithValidator(&BookmarkGroupCustomValidator{
 			client: mgr.GetClient(),
-			httpClient: &http.Client{
-				Timeout: 3 * time.Second,
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-				},
-			},
 		}).
 		Complete()
 }
@@ -65,8 +55,7 @@ func SetupBookmarkGroupWebhookWithManager(mgr ctrl.Manager) error {
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
 type BookmarkGroupCustomValidator struct {
-	client     client.Client
-	httpClient *http.Client
+	client client.Client //nolint:unused
 }
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type BookmarkGroup.
@@ -87,78 +76,7 @@ func (v *BookmarkGroupCustomValidator) ValidateDelete(_ context.Context, obj *da
 	return nil, nil
 }
 
-func (v *BookmarkGroupCustomValidator) validateBookmarkGroup(ctx context.Context, obj *dashboardv1alpha1.BookmarkGroup) error {
-	if len(obj.Spec.Links) == 0 {
-		return fieldValidationError(obj, "spec.links must not be empty")
-	}
-
-	for idx, link := range obj.Spec.Links {
-		if strings.TrimSpace(link.Name) == "" {
-			return fieldValidationError(obj, fmt.Sprintf("spec.links[%d].name must not be empty", idx))
-		}
-
-		resolvedURL, err := v.resolveURLFromLink(ctx, obj.Namespace, link)
-		if err != nil {
-			return fieldValidationError(obj, fmt.Sprintf("spec.links[%d]: %v", idx, err))
-		}
-
-		if err := validateTarget(link.Target); err != nil {
-			return fieldValidationError(obj, fmt.Sprintf("spec.links[%d].target: %v", idx, err))
-		}
-
-		if err := v.ensureReachable(ctx, resolvedURL); err != nil {
-			return fieldValidationError(obj, fmt.Sprintf("spec.links[%d].url: %v", idx, err))
-		}
-
-		if len(link.Icon) > 2048 {
-			return fieldValidationError(obj, fmt.Sprintf("spec.links[%d].icon: exceeds max length", idx))
-		}
-	}
-
-	return nil
-}
-
-func (v *BookmarkGroupCustomValidator) resolveURLFromLink(ctx context.Context, namespace string, link dashboardv1alpha1.BookmarkLink) (string, error) {
-	hasURL := strings.TrimSpace(link.URL) != ""
-	hasURLFrom := link.URLFrom != nil
-
-	if hasURL && hasURLFrom {
-		return "", fmt.Errorf("url and urlFrom are mutually exclusive")
-	}
-	if !hasURL && !hasURLFrom {
-		return "", fmt.Errorf("either url or urlFrom must be set")
-	}
-
-	if hasURL {
-		if err := validateHTTPURL(link.URL); err != nil {
-			return "", err
-		}
-		return link.URL, nil
-	}
-
-	return ResolveURLFromSource(ctx, v.client, namespace, link.URLFrom)
-}
-
-func (v *BookmarkGroupCustomValidator) ensureReachable(ctx context.Context, rawURL string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, rawURL, http.NoBody)
-	if err != nil {
-		return err
-	}
-	res, err := v.httpClient.Do(req)
-	if err != nil || res.StatusCode == http.StatusMethodNotAllowed {
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
-		if reqErr != nil {
-			return reqErr
-		}
-		res, err = v.httpClient.Do(req)
-		if err != nil {
-			return err
-		}
-	}
-	defer res.Body.Close() //nolint:errcheck
-	if res.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("url returned status %d", res.StatusCode)
-	}
+func (v *BookmarkGroupCustomValidator) validateBookmarkGroup(_ context.Context, _ *dashboardv1alpha1.BookmarkGroup) error {
 	return nil
 }
 

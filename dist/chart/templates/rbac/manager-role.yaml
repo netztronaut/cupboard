@@ -22,6 +22,45 @@ rules:
   resources:
   - bookmarkgroups
   - bookmarks
+  - infotiles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - bookmarkgroups/finalizers
+  - bookmarks/finalizers
+  - infotiles/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - bookmarkgroups/status
+  - bookmarks/status
+  - infotiles/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - externaldns.k8s.io
+  resources:
+  - dnsendpoints
   verbs:
   - get
   - list
@@ -38,6 +77,8 @@ rules:
   - gateway.networking.k8s.io
   resources:
   - httproutes
+  - tcproutes
+  - tlsroutes
   verbs:
   - get
   - list

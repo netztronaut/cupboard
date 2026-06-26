@@ -20,6 +20,40 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// BookmarkLinkTarget defines where links should open.
+// +kubebuilder:validation:Enum=_self;_blank;_parent;_top
+type BookmarkLinkTarget string
+
+const (
+	BookmarkLinkTargetSelf   BookmarkLinkTarget = "_self"
+	BookmarkLinkTargetBlank  BookmarkLinkTarget = "_blank"
+	BookmarkLinkTargetParent BookmarkLinkTarget = "_parent"
+	BookmarkLinkTargetTop    BookmarkLinkTarget = "_top"
+)
+
+// URLSource represents the set of resources to fetch the URL from.
+// It is compatible with Forecastle URL source fields and extended with serviceRef.
+type URLSource struct {
+	// +optional
+	IngressRef *LocalObjectReference `json:"ingressRef,omitempty"`
+	// +optional
+	RouteRef *LocalObjectReference `json:"routeRef,omitempty"`
+	// +optional
+	IngressRouteRef *LocalObjectReference `json:"ingressRouteRef,omitempty"`
+	// +optional
+	HTTPRouteRef *LocalObjectReference `json:"httpRouteRef,omitempty"`
+	// +optional
+	GRPCRouteRef *LocalObjectReference `json:"grpcRouteRef,omitempty"`
+	// +optional
+	ServiceRef *LocalObjectReference `json:"serviceRef,omitempty"`
+}
+
+// LocalObjectReference contains enough information to locate an object in the same namespace.
+type LocalObjectReference struct {
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
 // BookmarkSpec defines the desired state of Bookmark
 type BookmarkSpec struct {
 	// Group is the name of the group this bookmark belongs to.
@@ -67,6 +101,11 @@ type BookmarkSpec struct {
 	// +optional
 	Replicate bool `json:"replicate,omitempty"`
 
+	// Groups restricts this bookmark to users who belong to at least one listed group.
+	// When omitted, the bookmark is visible to every user.
+	// +optional
+	Groups []string `json:"groups,omitempty"`
+
 	// Properties allows free-form metadata, compatible with Forecastle.
 	// +optional
 	Properties map[string]string `json:"properties,omitempty"`
@@ -74,6 +113,21 @@ type BookmarkSpec struct {
 
 // BookmarkStatus defines the observed state of Bookmark.
 type BookmarkStatus struct {
+	// URLReachable indicates whether the URL was reachable at the last check.
+	// Nil means the check has not yet been performed; the bookmark is withheld
+	// from the dashboard until the first successful check.
+	// +optional
+	URLReachable *bool `json:"urlReachable,omitempty"`
+
+	// LastURLCheckAt is the timestamp of the most recent URL reachability check.
+	// +optional
+	LastURLCheckAt *metav1.Time `json:"lastURLCheckAt,omitempty"`
+
+	// URLCheckError describes the error from the most recent failed reachability check.
+	// Cleared on the next successful check.
+	// +optional
+	URLCheckError string `json:"urlCheckError,omitempty"`
+
 	// LastSyncedAt indicates when the controller last reconciled this object.
 	// +optional
 	LastSyncedAt *metav1.Time `json:"lastSyncedAt,omitempty"`

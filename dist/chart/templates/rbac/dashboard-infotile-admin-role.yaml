@@ -1,0 +1,21 @@
+{{- if .Values.rbac.helpers.enable }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    {{- include ( printf "%s.%s" .Chart.Name "labels" ) . | nindent 4 }}
+  name: {{ include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "dashboard-infotile-admin-role" "context" $) }}
+rules:
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - infotiles
+  verbs:
+  - '*'
+- apiGroups:
+  - dashboard.netztronaut.de
+  resources:
+  - infotiles/status
+  verbs:
+  - get
+{{- end }}

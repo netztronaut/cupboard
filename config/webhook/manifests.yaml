@@ -10,6 +10,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-dashboard-netztronaut-de-v1alpha1-bookmark
+  failurePolicy: Fail
+  name: vbookmark-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - dashboard.netztronaut.de
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - bookmarks
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-dashboard-netztronaut-de-v1alpha1-bookmarkgroup
   failurePolicy: Fail
   name: vbookmarkgroup-v1alpha1.kb.io

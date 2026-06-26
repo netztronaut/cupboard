@@ -47,127 +47,32 @@ spec:
           spec:
             description: spec defines the desired state of BookmarkGroup
             properties:
-              links:
-                description: Links are the dashboard entries shown under this group.
-                items:
-                  description: BookmarkLink describes a link entry rendered in the
-                    dashboard.
-                  properties:
-                    groups:
-                      description: |-
-                        Groups restricts this link to users who belong to at least one listed group.
-                        When omitted, the link is visible to every user.
-                      items:
-                        type: string
-                      type: array
-                    icon:
-                      description: |-
-                        Icon identifies an icon for this link.
-                        It can be an absolute URL (http/https/data), an icon-set key (e.g. fa-home),
-                        a relative URL, or a filename resolved by an asset service.
-                      maxLength: 2048
-                      type: string
-                    name:
-                      description: Name is the display name of this link.
-                      minLength: 1
-                      type: string
-                    networkRestricted:
-                      description: |-
-                        NetworkRestricted indicates this link is only reachable in private networks.
-                        Adapted from Forecastle's API for backward-compatibility.
-                      type: boolean
-                    properties:
-                      additionalProperties:
-                        type: string
-                      description: Properties allows free-form metadata, compatible
-                        with Forecastle.
-                      type: object
-                    target:
-                      description: |-
-                        Target controls where the URL is opened.
-                        Defaults to "_self".
-                      enum:
-                      - _self
-                      - _blank
-                      - _parent
-                      - _top
-                      type: string
-                    url:
-                      description: URL is the direct target URL for this link.
-                      maxLength: 2048
-                      type: string
-                    urlFrom:
-                      description: |-
-                        URLFrom resolves URL dynamically from Kubernetes resources.
-                        Supports Forecastle-compatible source fields.
-                      properties:
-                        httpRouteRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        ingressRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        ingressRouteRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        routeRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        serviceRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                      type: object
-                  required:
-                  - name
-                  type: object
-                minItems: 1
-                type: array
               name:
                 description: |-
                   Name is the display name for this group in the dashboard.
                   When omitted, metadata.name is used.
                 type: string
-            required:
-            - links
+              properties:
+                additionalProperties:
+                  type: string
+                description: Properties allows free-form metadata for this group,
+                  compatible with Forecastle.
+                type: object
+              replicate:
+                description: |-
+                  Replicate controls whether this group and its bookmarks are included in the
+                  synchronization API response served to peer cupboard instances.
+                  When false (the default) the group is only visible on the local dashboard.
+                type: boolean
             type: object
           status:
             description: status defines the observed state of BookmarkGroup
             properties:
+              bookmarkCount:
+                description: BookmarkCount is the number of Bookmark resources belonging
+                  to this group.
+                format: int32
+                type: integer
               conditions:
                 description: Conditions represent the current state of the BookmarkGroup
                   resource.
@@ -234,10 +139,266 @@ spec:
                   this object.
                 format: date-time
                 type: string
-              linkCount:
-                description: LinkCount is the number of links present in spec.links.
-                format: int32
-                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: bookmarks.dashboard.netztronaut.de
+spec:
+  group: dashboard.netztronaut.de
+  names:
+    kind: Bookmark
+    listKind: BookmarkList
+    plural: bookmarks
+    singular: bookmark
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Bookmark is the Schema for the bookmarks API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Bookmark
+            properties:
+              group:
+                description: |-
+                  Group is the name of the group this bookmark belongs to.
+                  The controller will dynamically create groups based on this field.
+                minLength: 1
+                type: string
+              groups:
+                description: |-
+                  Groups restricts this bookmark to users who belong to at least one listed group.
+                  When omitted, the bookmark is visible to every user.
+                items:
+                  type: string
+                type: array
+              icon:
+                description: |-
+                  Icon identifies an icon for this bookmark.
+                  It can be an absolute URL (http/https/data), an icon-set key (e.g. fa-home),
+                  a relative URL, or a filename resolved by an asset service.
+                maxLength: 2048
+                type: string
+              name:
+                description: Name is the display name of this bookmark.
+                minLength: 1
+                type: string
+              networkRestricted:
+                description: |-
+                  NetworkRestricted indicates this bookmark is only reachable in private networks.
+                  Adapted from Forecastle's API for backward-compatibility.
+                type: boolean
+              properties:
+                additionalProperties:
+                  type: string
+                description: Properties allows free-form metadata, compatible with
+                  Forecastle.
+                type: object
+              replicate:
+                description: |-
+                  Replicate controls whether this bookmark's group is included in the
+                  synchronization API response served to peer cupboard instances.
+                  When true, the controller sets Replicate=true on the managed BookmarkGroup.
+                  When false (the default) the group is only visible on the local dashboard.
+                type: boolean
+              target:
+                description: |-
+                  Target controls where the URL is opened.
+                  Defaults to "_self".
+                enum:
+                - _self
+                - _blank
+                - _parent
+                - _top
+                type: string
+              url:
+                description: URL is the direct target URL for this bookmark.
+                maxLength: 2048
+                type: string
+              urlFrom:
+                description: |-
+                  URLFrom resolves URL dynamically from Kubernetes resources.
+                  Supports Forecastle-compatible source fields.
+                properties:
+                  grpcRouteRef:
+                    description: LocalObjectReference contains enough information
+                      to locate an object in the same namespace.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  httpRouteRef:
+                    description: LocalObjectReference contains enough information
+                      to locate an object in the same namespace.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  ingressRef:
+                    description: LocalObjectReference contains enough information
+                      to locate an object in the same namespace.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  ingressRouteRef:
+                    description: LocalObjectReference contains enough information
+                      to locate an object in the same namespace.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  routeRef:
+                    description: LocalObjectReference contains enough information
+                      to locate an object in the same namespace.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  serviceRef:
+                    description: LocalObjectReference contains enough information
+                      to locate an object in the same namespace.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
+            required:
+            - group
+            - name
+            type: object
+          status:
+            description: status defines the observed state of Bookmark
+            properties:
+              conditions:
+                description: Conditions represent the current state of the Bookmark
+                  resource.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastSyncedAt:
+                description: LastSyncedAt indicates when the controller last reconciled
+                  this object.
+                format: date-time
+                type: string
+              lastURLCheckAt:
+                description: LastURLCheckAt is the timestamp of the most recent URL
+                  reachability check.
+                format: date-time
+                type: string
+              urlCheckError:
+                description: |-
+                  URLCheckError describes the error from the most recent failed reachability check.
+                  Cleared on the next successful check.
+                type: string
+              urlReachable:
+                description: |-
+                  URLReachable indicates whether the URL was reachable at the last check.
+                  Nil means the check has not yet been performed; the bookmark is withheld
+                  from the dashboard until the first successful check.
+                type: boolean
             type: object
         required:
         - spec
@@ -360,6 +521,179 @@ spec:
           status:
             description: ForecastleAppStatus defines the observed state of ForecastleApp.
             type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: infotiles.dashboard.netztronaut.de
+spec:
+  group: dashboard.netztronaut.de
+  names:
+    kind: InfoTile
+    listKind: InfoTileList
+    plural: infotiles
+    singular: infotile
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: InfoTile is the Schema for the infotiles API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of InfoTile
+            properties:
+              group:
+                description: |-
+                  Group is the dashboard group this tile belongs to.
+                  When omitted, the tile name is used as its own group.
+                type: string
+              httpRequest:
+                description: |-
+                  HTTPRequest describes how the controller should query a backend endpoint.
+                  When omitted, no HTTP fetch is performed and Processor may still be evaluated
+                  with an empty Response.
+                properties:
+                  body:
+                    description: Body is the request body sent for POST/PUT/PATCH
+                      requests.
+                    type: string
+                  headers:
+                    description: Headers are added to the HTTP request.
+                    items:
+                      description: InfoTileHeader is a single HTTP request header.
+                      properties:
+                        name:
+                          minLength: 1
+                          type: string
+                        value:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  method:
+                    description: Method is the HTTP method. Defaults to GET.
+                    enum:
+                    - GET
+                    - POST
+                    - PUT
+                    - PATCH
+                    - DELETE
+                    - HEAD
+                    type: string
+                  queryParams:
+                    description: QueryParams are appended to the URL as query parameters.
+                    items:
+                      description: InfoTileQueryParam is a single query-string parameter.
+                      properties:
+                        name:
+                          minLength: 1
+                          type: string
+                        value:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  url:
+                    description: URL is the endpoint to call.
+                    minLength: 1
+                    type: string
+                required:
+                - url
+                type: object
+              icon:
+                description: |-
+                  Icon identifies an icon for this tile.
+                  It can be a Font Awesome key (fa-*), an icon-set key (lucide:*, tabler:*, hero:*), or a URL.
+                maxLength: 2048
+                type: string
+              interval:
+                description: |-
+                  Interval controls how often the controller re-fetches httpRequest and re-renders the tile.
+                  Defaults to 60s.
+                type: string
+              name:
+                description: Name is the display name of this tile on the dashboard.
+                minLength: 1
+                type: string
+              processor:
+                description: |-
+                  Processor is a Helm-compatible (Sprig) template string evaluated after every fetch.
+                  The output is stored in status.content and rendered as raw HTML on the dashboard.
+                  Context variables:
+                    .Response.Code  — HTTP status code (int)
+                    .Response.Body  — raw response body (string)
+                    .Response.Data  — decoded JSON value when Content-Type is application/json, else nil
+                type: string
+              replicate:
+                description: Replicate controls whether this tile is included in the
+                  synchronisation API.
+                type: boolean
+              source:
+                description: |-
+                  Source is the raw HTML injected into the source badge area.
+                  When set it replaces the hardcoded source badge.
+                  The value is treated as safe HTML — only supply trusted content.
+                type: string
+              target:
+                description: Target controls where the URL is opened. Defaults to
+                  "_self".
+                type: string
+              url:
+                description: URL is an optional target URL opened when the user clicks
+                  the tile.
+                maxLength: 2048
+                type: string
+            required:
+            - name
+            type: object
+          status:
+            description: status defines the observed state of InfoTile
+            properties:
+              content:
+                description: |-
+                  Content is the rendered HTML output of the Processor template.
+                  It is injected verbatim into the dashboard tile body.
+                type: string
+              lastError:
+                description: |-
+                  LastError describes the most recent reconciliation error, if any.
+                  Cleared on the next successful cycle.
+                type: string
+              lastFetchedAt:
+                description: LastFetchedAt is the timestamp of the most recent successful
+                  fetch-and-render cycle.
+                format: date-time
+                type: string
+            type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true
@@ -500,6 +834,8 @@ rules:
   - dashboard.netztronaut.de
   resources:
   - bookmarkgroups
+  - bookmarks
+  - infotiles
   verbs:
   - create
   - delete
@@ -512,12 +848,16 @@ rules:
   - dashboard.netztronaut.de
   resources:
   - bookmarkgroups/finalizers
+  - bookmarks/finalizers
+  - infotiles/finalizers
   verbs:
   - update
 - apiGroups:
   - dashboard.netztronaut.de
   resources:
   - bookmarkgroups/status
+  - bookmarks/status
+  - infotiles/status
   verbs:
   - get
   - patch
@@ -545,6 +885,22 @@ rules:
   - list
   - watch
 - apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - externaldns.k8s.io
+  resources:
+  - dnsendpoints
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - forecastle.stakater.com
   resources:
   - forecastleapps
@@ -555,7 +911,10 @@ rules:
 - apiGroups:
   - gateway.networking.k8s.io
   resources:
+  - grpcroutes
   - httproutes
+  - tcproutes
+  - tlsroutes
   verbs:
   - get
   - list
@@ -749,7 +1108,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: docker.io/netztronaut/cupboard:latest
+        image: example.com/cupboard:v0.0.1
         livenessProbe:
           httpGet:
             path: /healthz
@@ -850,6 +1209,26 @@ metadata:
     cert-manager.io/inject-ca-from: cupboard-system/cupboard-serving-cert
   name: cupboard-validating-webhook-configuration
 webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cupboard-webhook-service
+      namespace: cupboard-system
+      path: /validate-dashboard-netztronaut-de-v1alpha1-bookmark
+  failurePolicy: Fail
+  name: vbookmark-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - dashboard.netztronaut.de
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - bookmarks
+  sideEffects: None
 - admissionReviewVersions:
   - v1
   clientConfig:

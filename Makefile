@@ -89,17 +89,38 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 		echo "K3D cluster '$(KIND_CLUSTER)' already exists. Skipping creation."; \
 	else \
 		echo "Creating K3D cluster '$(KIND_CLUSTER)'..."; \
-		$(K3D) cluster create $(KIND_CLUSTER); \
+		$(K3D) cluster create $(KIND_CLUSTER) --image=rancher/k3s:v1.36.1-k3s1;  \
 	fi
+	@$(K3D) kubeconfig merge $(KIND_CLUSTER) --kubeconfig-merge-default
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using K3D.
-	K3D=$(K3D) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+	K3D=$(K3D) KIND_CLUSTER=$(KIND_CLUSTER) KUBECONFIG=$$( $(K3D) kubeconfig write $(KIND_CLUSTER) ) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the K3D cluster used for e2e tests
 	@$(K3D) cluster delete $(KIND_CLUSTER)
+
+.PHONY: test-e2e-lifecycle
+test-e2e-lifecycle: setup-test-e2e manifests generate fmt vet ## Run the lifecycle e2e tests (Bookmark/BookmarkGroup/routing resources).
+	K3D=$(K3D) KIND_CLUSTER=$(KIND_CLUSTER) KUBECONFIG=$$( $(K3D) kubeconfig write $(KIND_CLUSTER) ) go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.label-filter=lifecycle -timeout 20m
+	$(MAKE) cleanup-test-e2e
+
+
+test-e2e-fleet: manifests generate fmt vet ## Run the foreign-cluster (fleet) e2e tests using four k3d clusters (full-mesh).
+	@command -v $(K3D) >/dev/null 2>&1 || { \
+		echo "K3D is not installed. Please install K3D manually."; \
+		exit 1; \
+	}
+	$(MAKE) cleanup-test-e2e-fleet 2>/dev/null || true
+	K3D=$(K3D) SKIP_KIND_IMAGE_LOAD=true CERT_MANAGER_INSTALL_SKIP=true go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.label-filter=fleet -timeout 30m; \
+		RET=$$?; $(MAKE) cleanup-test-e2e-fleet 2>/dev/null || true; exit $$RET
+
+.PHONY: cleanup-test-e2e-fleet
+cleanup-test-e2e-fleet: ## Tear down the four k3d clusters used for fleet e2e tests
+	@$(K3D) cluster delete cupboard-e2e-alpha cupboard-e2e-beta cupboard-e2e-gamma cupboard-e2e-delta 2>/dev/null || true
+	@docker network rm k3d-cupboard-e2e-alpha k3d-cupboard-e2e-beta k3d-cupboard-e2e-gamma k3d-cupboard-e2e-delta 2>/dev/null || true
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -377,7 +398,7 @@ HELM_APP_VERSION ?= $(VERSION)
 ## Destination directory for packaged Helm charts.
 HELM_PACKAGE_DIR ?= dist
 ## OCI registry/repository prefix for Helm chart pushes.
-HELM_OCI_REGISTRY ?= oci://docker.io/netztronaut/charts
+HELM_OCI_REGISTRY ?= oci://registry-1.docker.io/netztronaut
 ## Packaged Helm chart archive path.
 HELM_PACKAGE ?= $(HELM_PACKAGE_DIR)/cupboard-$(HELM_CHART_VERSION).tgz
 ## Additional arguments to pass to helm commands
@@ -436,4 +457,12 @@ release: ## Test, publish multi-arch image, build installer, package and push He
 	$(MAKE) test
 	$(MAKE) docker-buildx IMG="$(IMG)"
 	$(MAKE) build-installer IMG="$(IMG)"
+	$(MAKE) helm-push-oci HELM_CHART_VERSION="$(HELM_CHART_VERSION)" HELM_APP_VERSION="$(HELM_APP_VERSION)"
+
+.PHONY: upload
+upload: test test-e2e ## Build and push multi-arch image, then pin its digest in the Helm chart and push to OCI registry.
+	$(MAKE) docker-buildx IMG="$(IMG)"
+	$(eval _DIGEST := $(shell $(CONTAINER_TOOL) buildx imagetools inspect "$(IMG)" --format '{{.Manifest.Digest}}'))
+	$(eval _IMGREF := $(shell echo "$(IMG)" | sed 's|^docker\.io/||')@$(_DIGEST))
+	sed -i.bak -e "s|^\( *repository:\).*|\1 $(_IMGREF)|" "$(HELM_CHART_DIR)/values.yaml" && rm -f "$(HELM_CHART_DIR)/values.yaml.bak"
 	$(MAKE) helm-push-oci HELM_CHART_VERSION="$(HELM_CHART_VERSION)" HELM_APP_VERSION="$(HELM_APP_VERSION)"

@@ -39,125 +39,20 @@ spec:
           spec:
             description: spec defines the desired state of BookmarkGroup
             properties:
-              links:
-                description: |-
-                  Links are the dashboard entries shown under this group.
-                  When omitted or empty, the group is created but contains no links.
-                items:
-                  description: BookmarkLink describes a link entry rendered in the
-                    dashboard.
-                  properties:
-                    groups:
-                      description: |-
-                        Groups restricts this link to users who belong to at least one listed group.
-                        When omitted, the link is visible to every user.
-                      items:
-                        type: string
-                      type: array
-                    icon:
-                      description: |-
-                        Icon identifies an icon for this link.
-                        It can be an absolute URL (http/https/data), an icon-set key (e.g. fa-home),
-                        a relative URL, or a filename resolved by an asset service.
-                      maxLength: 2048
-                      type: string
-                    name:
-                      description: Name is the display name of this link.
-                      minLength: 1
-                      type: string
-                    networkRestricted:
-                      description: |-
-                        NetworkRestricted indicates this link is only reachable in private networks.
-                        Adapted from Forecastle's API for backward-compatibility.
-                      type: boolean
-                    properties:
-                      additionalProperties:
-                        type: string
-                      description: Properties allows free-form metadata, compatible
-                        with Forecastle.
-                      type: object
-                    target:
-                      description: |-
-                        Target controls where the URL is opened.
-                        Defaults to "_self".
-                      enum:
-                      - _self
-                      - _blank
-                      - _parent
-                      - _top
-                      type: string
-                    url:
-                      description: URL is the direct target URL for this link.
-                      maxLength: 2048
-                      type: string
-                    urlFrom:
-                      description: |-
-                        URLFrom resolves URL dynamically from Kubernetes resources.
-                        Supports Forecastle-compatible source fields.
-                      properties:
-                        httpRouteRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        ingressRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        ingressRouteRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        routeRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        serviceRef:
-                          description: LocalObjectReference contains enough information
-                            to locate an object in the same namespace.
-                          properties:
-                            name:
-                              minLength: 1
-                              type: string
-                          required:
-                          - name
-                          type: object
-                      type: object
-                  required:
-                  - name
-                  type: object
-                type: array
               name:
                 description: |-
                   Name is the display name for this group in the dashboard.
                   When omitted, metadata.name is used.
                 type: string
+              properties:
+                additionalProperties:
+                  type: string
+                description: Properties allows free-form metadata for this group,
+                  compatible with Forecastle.
+                type: object
               replicate:
                 description: |-
-                  Replicate controls whether this group and its links are included in the
+                  Replicate controls whether this group and its bookmarks are included in the
                   synchronization API response served to peer cupboard instances.
                   When false (the default) the group is only visible on the local dashboard.
                 type: boolean
@@ -165,6 +60,11 @@ spec:
           status:
             description: status defines the observed state of BookmarkGroup
             properties:
+              bookmarkCount:
+                description: BookmarkCount is the number of Bookmark resources belonging
+                  to this group.
+                format: int32
+                type: integer
               conditions:
                 description: Conditions represent the current state of the BookmarkGroup
                   resource.
@@ -231,10 +131,6 @@ spec:
                   this object.
                 format: date-time
                 type: string
-              linkCount:
-                description: LinkCount is the number of links present in spec.links.
-                format: int32
-                type: integer
             type: object
         required:
         - spec

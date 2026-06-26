@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -119,11 +120,14 @@ type DashboardInfoTile struct {
 }
 
 type DashboardLinkGroup struct {
-	Name          string `json:"name"`
-	Priority      int    `json:"priority"`
-	PriorityClass string `json:"priorityClass,omitempty"`
-	DisplayName   string `json:"displayName"`
-	Source        string `json:"source,omitempty"`
+	Name          string            `json:"name"`
+	Priority      int               `json:"priority"`
+	PriorityClass string            `json:"priorityClass,omitempty"`
+	DisplayName   string            `json:"displayName"`
+	Source        string            `json:"source,omitempty"`
+	Properties    map[string]string `json:"properties,omitempty"`
+	// Replicate is an in-process flag; not serialised to JSON.
+	Replicate bool `json:"-"`
 }
 
 type DashboardLink struct {
@@ -167,7 +171,12 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 			return DashboardResponse{}, err
 		}
 	}
-	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, "TLSRoute") {
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, "GRPCRoute") {
+		if err := collectGRPCRoutes(ctx, c.reader, groups, groupDetails); err != nil {
+			return DashboardResponse{}, err
+		}
+	}
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, "TLSRoute") {
 		if err := collectTLSRoutes(ctx, c.reader, groups, groupDetails); err != nil {
 			return DashboardResponse{}, err
 		}
@@ -228,7 +237,10 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 	for _, group := range orderedGroups {
 		links := filterLinksForGroups(groups[group.Name], userGroups)
 		groupTiles := tiles[group.Name]
-		if len(links) == 0 && len(groupTiles) == 0 {
+		// In the sync path, always include groups marked for replication so that
+		// peer instances receive the group metadata (display name, properties)
+		// even when no bookmarks are reachable yet.
+		if len(links) == 0 && len(groupTiles) == 0 && !(localOnly && group.Replicate) {
 			continue
 		}
 		sort.SliceStable(links, func(i, j int) bool {
@@ -270,6 +282,7 @@ func (c *dashboardCollector) mergeRemoteData(groups map[string][]DashboardLink, 
 						Priority:      remoteLG.Priority,
 						PriorityClass: remoteLG.PriorityClass,
 						DisplayName:   remoteLG.DisplayName,
+						Properties:    remoteLG.Properties,
 						Source:        source,
 					}
 				} else {
@@ -298,11 +311,17 @@ func (c *dashboardCollector) mergeForeignClusterData(ctx context.Context, groups
 		tempGroups := map[string][]DashboardLink{}
 		tempGroupDetails := map[string]DashboardLinkGroup{}
 
+		// Cap per-cluster collection so a single unresponsive peer cannot block
+		// the dashboard handler for longer than the transport's response-header
+		// timeout (30s) plus a small buffer.
+		fcCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+
 		mini := &dashboardCollector{
 			reader:    fc.Client,
 			discovery: fc.Discovery,
 		}
-		collectForeignLinks(ctx, mini, tempGroups, tempGroupDetails)
+		collectForeignLinks(fcCtx, mini, tempGroups, tempGroupDetails)
+		cancel()
 
 		// Merge into main maps, stamping the source.
 		for groupName, links := range tempGroups {
@@ -345,7 +364,12 @@ func collectForeignLinks(ctx context.Context, c *dashboardCollector, groups map[
 			setupLog.Info("Skipping HTTPRoute collection from foreign cluster", "error", err.Error())
 		}
 	}
-	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, "TLSRoute") {
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, "GRPCRoute") {
+		if err := collectGRPCRoutes(ctx, c.reader, groups, groupDetails); err != nil {
+			setupLog.Info("Skipping GRPCRoute collection from foreign cluster", "error", err.Error())
+		}
+	}
+	if c.resourceAvailable(ctx, schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, "TLSRoute") {
 		if err := collectTLSRoutes(ctx, c.reader, groups, groupDetails); err != nil {
 			setupLog.Info("Skipping TLSRoute collection from foreign cluster", "error", err.Error())
 		}
@@ -425,7 +449,8 @@ func (c *dashboardCollector) logMissingOptionalResources(ctx context.Context) {
 		{groupVersion: forecastlev1alpha1.GroupVersion, kind: "ForecastleApp"},
 		{groupVersion: schema.GroupVersion{Group: "networking.k8s.io", Version: "v1"}, kind: "Ingress"},
 		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, kind: "HTTPRoute"},
-		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, kind: "TLSRoute"},
+		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, kind: "GRPCRoute"},
+		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1"}, kind: "TLSRoute"},
 		{groupVersion: schema.GroupVersion{Group: "gateway.networking.k8s.io", Version: "v1alpha2"}, kind: "TCPRoute"},
 		{groupVersion: schema.GroupVersion{Group: "traefik.io", Version: "v1alpha1"}, kind: "IngressRoute"},
 		{groupVersion: schema.GroupVersion{Group: "traefik.containo.us", Version: "v1alpha1"}, kind: "IngressRoute"},
@@ -454,41 +479,57 @@ func (c *dashboardCollector) resourceAvailable(ctx context.Context, groupVersion
 }
 
 func collectBookmarkGroups(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
-	var list dashboardv1alpha1.BookmarkGroupList
-	if err := c.List(ctx, &list); err != nil {
+	// Collect group display names from BookmarkGroup resources.
+	var groupList dashboardv1alpha1.BookmarkGroupList
+	if err := c.List(ctx, &groupList); err != nil {
 		return err
 	}
-	for _, item := range list.Items {
+	groupReplicate := make(map[string]bool)
+	for _, item := range groupList.Items {
 		groupName := strings.TrimSpace(item.Spec.Name)
 		if groupName == "" {
 			groupName = item.Name
 		}
 		ensureLinkGroup(groupDetails, groupName)
-		for _, link := range item.Spec.Links {
-			url := strings.TrimSpace(link.URL)
-			if link.URLFrom != nil {
-				resolved, err := webhookdashboardv1alpha1.ResolveURLFromSource(ctx, c, item.Namespace, link.URLFrom)
-				if err == nil {
-					url = resolved
-				}
-			}
-			if url == "" {
-				continue
-			}
-			target := string(link.Target)
-			if target == "" {
-				target = string(dashboardv1alpha1.BookmarkLinkTargetSelf)
-			}
-			groups[groupName] = append(groups[groupName], DashboardLink{
-				Name:      link.Name,
-				URL:       url,
-				Target:    target,
-				Icon:      link.Icon,
-				Source:    "bookmarkgroup",
-				Groups:    normalizedGroups(link.Groups),
-				Replicate: item.Spec.Replicate,
-			})
+		// Overwrite with full metadata from the BookmarkGroup spec.
+		existing := groupDetails[groupName]
+		existing.Replicate = item.Spec.Replicate
+		if len(item.Spec.Properties) > 0 {
+			existing.Properties = item.Spec.Properties
 		}
+		groupDetails[groupName] = existing
+		groupReplicate[item.Name] = item.Spec.Replicate
+	}
+
+	// Collect links from individual Bookmark resources.
+	var bookmarkList dashboardv1alpha1.BookmarkList
+	if err := c.List(ctx, &bookmarkList); err != nil {
+		return err
+	}
+	for _, b := range bookmarkList.Items {
+		// Only show bookmarks whose URL has been confirmed reachable.
+		if b.Status.URLReachable == nil || !*b.Status.URLReachable {
+			continue
+		}
+
+		groupName := strings.TrimSpace(b.Spec.Group)
+		ensureLinkGroup(groupDetails, groupName)
+
+		url := strings.TrimSpace(b.Spec.URL)
+		target := string(b.Spec.Target)
+		if target == "" {
+			target = string(dashboardv1alpha1.BookmarkLinkTargetSelf)
+		}
+		replicate := b.Spec.Replicate || groupReplicate[b.Spec.Group]
+		groups[groupName] = append(groups[groupName], DashboardLink{
+			Name:      b.Spec.Name,
+			URL:       url,
+			Target:    target,
+			Icon:      b.Spec.Icon,
+			Source:    "bookmark",
+			Groups:    normalizedGroups(b.Spec.Groups),
+			Replicate: replicate,
+		})
 	}
 	return nil
 }
@@ -641,11 +682,49 @@ func collectHTTPRoutes(ctx context.Context, c client.Reader, groups map[string][
 	return nil
 }
 
+func collectGRPCRoutes(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "gateway.networking.k8s.io",
+		Version: "v1",
+		Kind:    "GRPCRouteList",
+	})
+	if err := c.List(ctx, list, client.MatchingLabels{labelEnabled: "true"}); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	for _, route := range list.Items {
+		meta := resourceMetaFrom(&route)
+		if meta.URL == "" {
+			if hostnames, found, err := unstructured.NestedStringSlice(route.Object, "spec", "hostnames"); err == nil && found {
+				for _, host := range hostnames {
+					if strings.TrimSpace(host) != "" {
+						meta.URL = "https://" + host
+						break
+					}
+				}
+			}
+		}
+		if meta.Group == "" || meta.Name == "" || meta.URL == "" {
+			continue
+		}
+		ensureLinkGroup(groupDetails, meta.Group)
+		groups[meta.Group] = append(groups[meta.Group], DashboardLink{
+			Name:      meta.Name,
+			URL:       meta.URL,
+			Target:    meta.Target,
+			Icon:      meta.Icon,
+			Source:    "grpcroute",
+			Replicate: meta.Replicate,
+		})
+	}
+	return nil
+}
+
 func collectTLSRoutes(ctx context.Context, c client.Reader, groups map[string][]DashboardLink, groupDetails map[string]DashboardLinkGroup) error {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "gateway.networking.k8s.io",
-		Version: "v1alpha2",
+		Version: "v1",
 		Kind:    "TLSRouteList",
 	})
 	if err := c.List(ctx, list, client.MatchingLabels{labelEnabled: "true"}); err != nil {

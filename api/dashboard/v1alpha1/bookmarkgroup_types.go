@@ -27,12 +27,11 @@ type BookmarkGroupSpec struct {
 	// +optional
 	Name string `json:"name,omitempty"`
 
-	// Links are the dashboard entries shown under this group.
-	// When omitted or empty, the group is created but contains no links.
+	// Properties allows free-form metadata for this group, compatible with Forecastle.
 	// +optional
-	Links []BookmarkLink `json:"links,omitempty"`
+	Properties map[string]string `json:"properties,omitempty"`
 
-	// Replicate controls whether this group and its links are included in the
+	// Replicate controls whether this group and its bookmarks are included in the
 	// synchronization API response served to peer cupboard instances.
 	// When false (the default) the group is only visible on the local dashboard.
 	// +optional
@@ -41,9 +40,9 @@ type BookmarkGroupSpec struct {
 
 // BookmarkGroupStatus defines the observed state of BookmarkGroup.
 type BookmarkGroupStatus struct {
-	// LinkCount is the number of links present in spec.links.
+	// BookmarkCount is the number of Bookmark resources belonging to this group.
 	// +optional
-	LinkCount int32 `json:"linkCount,omitempty"`
+	BookmarkCount int32 `json:"bookmarkCount,omitempty"`
 
 	// LastSyncedAt indicates when the controller last reconciled this object.
 	// +optional
@@ -54,81 +53,6 @@ type BookmarkGroupStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
-// BookmarkLinkTarget defines where links should open.
-// +kubebuilder:validation:Enum=_self;_blank;_parent;_top
-type BookmarkLinkTarget string
-
-const (
-	BookmarkLinkTargetSelf   BookmarkLinkTarget = "_self"
-	BookmarkLinkTargetBlank  BookmarkLinkTarget = "_blank"
-	BookmarkLinkTargetParent BookmarkLinkTarget = "_parent"
-	BookmarkLinkTargetTop    BookmarkLinkTarget = "_top"
-)
-
-// BookmarkLink describes a link entry rendered in the dashboard.
-type BookmarkLink struct {
-	// Name is the display name of this link.
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
-
-	// URL is the direct target URL for this link.
-	// +optional
-	// +kubebuilder:validation:MaxLength=2048
-	URL string `json:"url,omitempty"`
-
-	// URLFrom resolves URL dynamically from Kubernetes resources.
-	// Supports Forecastle-compatible source fields.
-	// +optional
-	URLFrom *URLSource `json:"urlFrom,omitempty"`
-
-	// Target controls where the URL is opened.
-	// Defaults to "_self".
-	// +optional
-	Target BookmarkLinkTarget `json:"target,omitempty"`
-
-	// Icon identifies an icon for this link.
-	// It can be an absolute URL (http/https/data), an icon-set key (e.g. fa-home),
-	// a relative URL, or a filename resolved by an asset service.
-	// +optional
-	// +kubebuilder:validation:MaxLength=2048
-	Icon string `json:"icon,omitempty"`
-
-	// NetworkRestricted indicates this link is only reachable in private networks.
-	// Adapted from Forecastle's API for backward-compatibility.
-	// +optional
-	NetworkRestricted bool `json:"networkRestricted,omitempty"`
-
-	// Groups restricts this link to users who belong to at least one listed group.
-	// When omitted, the link is visible to every user.
-	// +optional
-	Groups []string `json:"groups,omitempty"`
-
-	// Properties allows free-form metadata, compatible with Forecastle.
-	// +optional
-	Properties map[string]string `json:"properties,omitempty"`
-}
-
-// URLSource represents the set of resources to fetch the URL from.
-// It is compatible with Forecastle URL source fields and extended with serviceRef.
-type URLSource struct {
-	// +optional
-	IngressRef *LocalObjectReference `json:"ingressRef,omitempty"`
-	// +optional
-	RouteRef *LocalObjectReference `json:"routeRef,omitempty"`
-	// +optional
-	IngressRouteRef *LocalObjectReference `json:"ingressRouteRef,omitempty"`
-	// +optional
-	HTTPRouteRef *LocalObjectReference `json:"httpRouteRef,omitempty"`
-	// +optional
-	ServiceRef *LocalObjectReference `json:"serviceRef,omitempty"`
-}
-
-// LocalObjectReference contains enough information to locate an object in the same namespace.
-type LocalObjectReference struct {
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
 }
 
 // +kubebuilder:object:root=true
