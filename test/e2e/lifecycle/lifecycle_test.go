@@ -101,7 +101,7 @@ var _ = Describe("Lifecycle", Ordered, Label("lifecycle"), func() {
 		_, err = utils.Run(exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage)))
 		Expect(err).NotTo(HaveOccurred(), "Failed to build manager image")
 		By("loading manager image into cluster")
-		Expect(utils.LoadImageToKindClusterWithName(managerImage)).To(Succeed(), "Failed to load manager image")
+		Expect(utils.LoadImageToCluster(managerImage)).To(Succeed(), "Failed to load manager image")
 
 		certManagerInstalled := false
 		if !utils.IsCertManagerCRDsInstalled() {

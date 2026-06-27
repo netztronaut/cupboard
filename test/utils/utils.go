@@ -33,9 +33,7 @@ const (
 	certmanagerVersion = "v1.20.2"
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
 
-	defaultKindBinary  = "kind"
-	defaultKindCluster = "kind"
-	defaultK3dCluster  = "cupboard-test-e2e"
+	defaultK3dCluster = "cupboard-test-e2e"
 	// K3sImage is the k3s image used for all test clusters.
 	K3sImage = "rancher/k3s:v1.36.1-k3s1"
 )
@@ -223,21 +221,11 @@ func DeleteK3dCluster(name string) {
 	_, _ = Run(exec.Command(K3dBinary(), "cluster", "delete", name))
 }
 
-// LoadImageToKindClusterWithName loads a local docker image to the kind or k3d cluster
-func LoadImageToKindClusterWithName(name string) error {
+// LoadImageToCluster imports a local Docker image into the k3d test cluster.
+func LoadImageToCluster(name string) error {
 	cluster := DefaultK3dClusterName()
 	cmd := exec.Command(K3dBinary(), "image", "import", name, "--cluster", cluster)
 	_, err := Run(cmd)
-	if err == nil {
-		return nil
-	}
-	// Fallback to kind
-	kindBinary := defaultKindBinary
-	if v, ok := os.LookupEnv("KIND"); ok {
-		kindBinary = v
-	}
-	cmd = exec.Command(kindBinary, "load", "docker-image", name, "--name", cluster)
-	_, err = Run(cmd)
 	return err
 }
 
