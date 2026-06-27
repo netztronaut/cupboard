@@ -222,8 +222,14 @@ func DeleteK3dCluster(name string) {
 }
 
 // LoadImageToCluster imports a local Docker image into the k3d test cluster.
+// When a pre-provisioned cluster is in use (KUBECONFIG pre-set, no k3d cluster
+// with this name exists), the import is skipped and nil is returned.
 func LoadImageToCluster(name string) error {
 	cluster := DefaultK3dClusterName()
+	out, _ := Run(exec.Command(K3dBinary(), "cluster", "list"))
+	if !strings.Contains(out, cluster) {
+		return nil
+	}
 	cmd := exec.Command(K3dBinary(), "image", "import", name, "--cluster", cluster)
 	_, err := Run(cmd)
 	return err
