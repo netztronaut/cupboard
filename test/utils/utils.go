@@ -178,30 +178,19 @@ func DefaultK3dClusterName() string {
 	return defaultK3dCluster
 }
 
-// EnsureK3dCluster creates a k3d cluster with the given name if it does not already
-// exist and KUBECONFIG is not pre-set (pre-set KUBECONFIG implies an external cluster).
-// Returns true when the cluster was newly created.
-func EnsureK3dCluster(name string) (bool, error) {
-	if os.Getenv("KUBECONFIG") != "" {
-		return false, nil
-	}
-	out, _ := Run(exec.Command(K3dBinary(), "cluster", "list"))
-	if strings.Contains(out, name) {
-		return false, nil
-	}
-	if _, err := Run(exec.Command(K3dBinary(), "cluster", "create", name, "--image", K3sImage)); err != nil {
-		return false, err
-	}
-	return true, nil
+// EnsureK3dCluster creates a fresh k3d cluster with the given name, deleting any
+// existing cluster with the same name first to guarantee a clean, reproducible state.
+func EnsureK3dCluster(name string) error {
+	_, _ = Run(exec.Command(K3dBinary(), "cluster", "delete", name))
+	_, err := Run(exec.Command(K3dBinary(), "cluster", "create", name, "--image", K3sImage))
+	return err
 }
 
 // SetupK3dKubeconfig writes the named cluster's kubeconfig to a temp file, sets
-// KUBECONFIG, and returns a cleanup function that deletes the file and restores the
-// previous value.  When KUBECONFIG is already set the function is a no-op.
+// KUBECONFIG, and returns a cleanup function that removes the file and restores the
+// previous KUBECONFIG value.
 func SetupK3dKubeconfig(clusterName string) (func(), error) {
-	if prev := os.Getenv("KUBECONFIG"); prev != "" {
-		return func() {}, nil
-	}
+	prev := os.Getenv("KUBECONFIG")
 	out, err := Run(exec.Command(K3dBinary(), "kubeconfig", "write", clusterName))
 	if err != nil {
 		return nil, err
@@ -211,7 +200,11 @@ func SetupK3dKubeconfig(clusterName string) (func(), error) {
 		return nil, err
 	}
 	return func() {
-		_ = os.Unsetenv("KUBECONFIG")
+		if prev == "" {
+			_ = os.Unsetenv("KUBECONFIG")
+		} else {
+			_ = os.Setenv("KUBECONFIG", prev)
+		}
 		_ = os.Remove(kubeconfigPath)
 	}, nil
 }
@@ -222,14 +215,8 @@ func DeleteK3dCluster(name string) {
 }
 
 // LoadImageToCluster imports a local Docker image into the k3d test cluster.
-// When a pre-provisioned cluster is in use (KUBECONFIG pre-set, no k3d cluster
-// with this name exists), the import is skipped and nil is returned.
 func LoadImageToCluster(name string) error {
 	cluster := DefaultK3dClusterName()
-	out, _ := Run(exec.Command(K3dBinary(), "cluster", "list"))
-	if !strings.Contains(out, cluster) {
-		return nil
-	}
 	cmd := exec.Command(K3dBinary(), "image", "import", name, "--cluster", cluster)
 	_, err := Run(cmd)
 	return err

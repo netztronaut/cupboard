@@ -88,13 +88,10 @@ var _ = Describe("Lifecycle", Ordered, Label("lifecycle"), func() {
 		// ---- 0. Cluster, image, cert-manager -----------------------------------
 
 		clusterName := utils.DefaultK3dClusterName()
-		clusterCreated, err := utils.EnsureK3dCluster(clusterName)
-		Expect(err).NotTo(HaveOccurred(), "Failed to ensure k3d cluster")
+		Expect(utils.EnsureK3dCluster(clusterName)).To(Succeed(), "Failed to create k3d cluster")
+		DeferCleanup(func() { utils.DeleteK3dCluster(clusterName) })
 		cleanupKubeconfig, err := utils.SetupK3dKubeconfig(clusterName)
 		Expect(err).NotTo(HaveOccurred(), "Failed to set up kubeconfig")
-		if clusterCreated {
-			DeferCleanup(func() { utils.DeleteK3dCluster(clusterName) })
-		}
 		DeferCleanup(cleanupKubeconfig)
 
 		By("building manager image")
