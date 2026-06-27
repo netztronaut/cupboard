@@ -21,8 +21,8 @@ CONTAINER_TOOL ?= docker
 NPM ?= npm
 ENABLE_WEBHOOKS ?= false
 ENABLE_AUTH ?= false
-LOCAL_TESTING_KIND_CLUSTER ?= cupboard
-LOCAL_TESTING_KIND_CONTEXT ?= k3d-$(LOCAL_TESTING_KIND_CLUSTER)
+LOCAL_TESTING_K3D_CLUSTER ?= cupboard
+LOCAL_TESTING_K3D_CONTEXT ?= k3d-$(LOCAL_TESTING_K3D_CLUSTER)
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -72,12 +72,12 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
+# The default setup assumes k3d is pre-installed and builds/loads the Manager Docker image locally.
 # kubectl kuberc is disabled by default for test isolation; enable with:
 # - KUBECTL_KUBERC=true
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= cupboard-test-e2e
+K3D_CLUSTER ?= cupboard-test-e2e
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Manually create the K3D cluster used for e2e tests (optional; tests create it automatically)
@@ -85,21 +85,21 @@ setup-test-e2e: ## Manually create the K3D cluster used for e2e tests (optional;
 		echo "K3D is not installed. Please install K3D manually."; \
 		exit 1; \
 	}
-	@if $(K3D) cluster list | grep -Fq "$(KIND_CLUSTER)"; then \
-		echo "K3D cluster '$(KIND_CLUSTER)' already exists. Skipping creation."; \
+	@if $(K3D) cluster list | grep -Fq "$(K3D_CLUSTER)"; then \
+		echo "K3D cluster '$(K3D_CLUSTER)' already exists. Skipping creation."; \
 	else \
-		echo "Creating K3D cluster '$(KIND_CLUSTER)'..."; \
-		$(K3D) cluster create $(KIND_CLUSTER) --image=rancher/k3s:v1.36.1-k3s1; \
+		echo "Creating K3D cluster '$(K3D_CLUSTER)'..."; \
+		$(K3D) cluster create $(K3D_CLUSTER) --image=rancher/k3s:v1.36.1-k3s1; \
 	fi
-	@$(K3D) kubeconfig merge $(KIND_CLUSTER) --kubeconfig-merge-default
+	@$(K3D) kubeconfig merge $(K3D_CLUSTER) --kubeconfig-merge-default
 
 .PHONY: test-e2e
-test-e2e: manifests generate fmt vet ## Run the e2e tests (cluster is created/deleted automatically).
+test-e2e: manifests generate fmt vet cleanup-test-e2e ## Run the e2e tests (cluster is created/deleted automatically).
 	go test -tags=e2e -p 1 ./test/e2e/... -v -ginkgo.v -timeout 30m
 
 .PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Manually tear down the K3D cluster used for e2e tests
-	@$(K3D) cluster delete $(KIND_CLUSTER)
+cleanup-test-e2e: cleanup-test-e2e-fleet ## Manually tear down the K3D cluster used for e2e tests
+	@$(K3D) cluster delete $(K3D_CLUSTER)
 
 .PHONY: test-e2e-manager
 test-e2e-manager: manifests generate fmt vet ## Run the manager e2e tests (cluster is created/deleted automatically).
@@ -110,7 +110,7 @@ test-e2e-lifecycle: manifests generate fmt vet ## Run the lifecycle e2e tests (c
 	go test -tags=e2e ./test/e2e/lifecycle/ -v -ginkgo.v -timeout 20m
 
 .PHONY: test-e2e-fleet
-test-e2e-fleet: manifests generate fmt vet ## Run the foreign-cluster (fleet) e2e tests (clusters are created/deleted automatically).
+test-e2e-fleet: manifests generate fmt vet cleanup-test-e2e-fleet ## Run the foreign-cluster (fleet) e2e tests (clusters are created/deleted automatically).
 	go test -tags=e2e ./test/e2e/fleet/ -v -ginkgo.v -timeout 30m
 
 .PHONY: cleanup-test-e2e-fleet
@@ -139,16 +139,16 @@ build: web-build manifests generate fmt vet ## Build manager binary.
 .PHONY: run
 run: web-build manifests generate fmt vet ## Run a controller from your host.
 	@if [ "$${LOCAL_TESTING:-}" = "true" ]; then \
-		if ! ($(MAKE) setup-kind && $(MAKE) deploy-manager-local-testing); then \
+		if ! ($(MAKE) setup-k3d && $(MAKE) deploy-manager-local-testing); then \
 			exit 1; \
 		fi; \
 		echo ""; \
-		echo "✓ Manager deployed to kind cluster"; \
+		echo "✓ Manager deployed to k3d cluster"; \
 		echo "  Web interface: http://cupboard.localhost/"; \
 		echo "  Webhook server: localhost:9443"; \
 		echo ""; \
 		echo "Streaming manager logs (Ctrl+C to stop):"; \
-		$(KUBECTL) logs -f deployment/controller-manager -n local-testing --context $(LOCAL_TESTING_KIND_CONTEXT) || true; \
+		$(KUBECTL) logs -f deployment/controller-manager -n local-testing --context $(LOCAL_TESTING_K3D_CONTEXT) || true; \
 	else \
 		ENABLE_WEBHOOKS=$(ENABLE_WEBHOOKS) ENABLE_AUTH=$(ENABLE_AUTH) go run ./cmd/main.go; \
 	fi
@@ -166,25 +166,25 @@ setup-hosts: ## Add local-testing hostnames to /etc/hosts (requires sudo)
 		fi; \
 	done
 
-.PHONY: setup-kind
-setup-kind: setup-hosts ## Set up a K3D cluster for LOCAL_TESTING if it does not exist
+.PHONY: setup-k3d
+setup-k3d: setup-hosts ## Set up a K3D cluster for LOCAL_TESTING if it does not exist
 	@command -v $(K3D) >/dev/null 2>&1 || { \
 		echo "K3D is not installed. Please install K3D manually."; \
 		exit 1; \
 	}
-	@if $(K3D) cluster list | grep -Fq "$(LOCAL_TESTING_KIND_CLUSTER)"; then \
-		echo "K3D cluster '$(LOCAL_TESTING_KIND_CLUSTER)' already exists. Skipping creation."; \
+	@if $(K3D) cluster list | grep -Fq "$(LOCAL_TESTING_K3D_CLUSTER)"; then \
+		echo "K3D cluster '$(LOCAL_TESTING_K3D_CLUSTER)' already exists. Skipping creation."; \
 	else \
-		echo "Creating K3D cluster '$(LOCAL_TESTING_KIND_CLUSTER)'..."; \
-		$(K3D) cluster create $(LOCAL_TESTING_KIND_CLUSTER) --port "80:80@loadbalancer" --port "443:443@loadbalancer" --k3s-arg="--disable=traefik@server:0"; \
+		echo "Creating K3D cluster '$(LOCAL_TESTING_K3D_CLUSTER)'..."; \
+		$(K3D) cluster create $(LOCAL_TESTING_K3D_CLUSTER) --port "80:80@loadbalancer" --port "443:443@loadbalancer" --k3s-arg="--disable=traefik@server:0"; \
 		echo "Waiting for control-plane node to be ready..."; \
-		$(K3D) kubeconfig get $(LOCAL_TESTING_KIND_CLUSTER) > kubeconfig.yaml; \
-		KUBECONFIG=kubeconfig.yaml $(KUBECTL) wait --for=condition=Ready node/$(LOCAL_TESTING_KIND_CLUSTER)-control-plane --timeout=120s --context $(LOCAL_TESTING_KIND_CONTEXT); \
+		$(K3D) kubeconfig get $(LOCAL_TESTING_K3D_CLUSTER) > kubeconfig.yaml; \
+		KUBECONFIG=kubeconfig.yaml $(KUBECTL) wait --for=condition=Ready node/$(LOCAL_TESTING_K3D_CLUSTER)-control-plane --timeout=120s --context $(LOCAL_TESTING_K3D_CONTEXT); \
 		echo "Installing CRDs..."; \
-		KUBECONFIG=kubeconfig.yaml $(KUBECTL) apply -f config/crd/bases/ --context $(LOCAL_TESTING_KIND_CONTEXT); \
+		KUBECONFIG=kubeconfig.yaml $(KUBECTL) apply -f config/crd/bases/ --context $(LOCAL_TESTING_K3D_CONTEXT); \
 	fi
 	@echo "Updating kubeconfig..."; \
-	$(K3D) kubeconfig get $(LOCAL_TESTING_KIND_CLUSTER) > kubeconfig.yaml
+	$(K3D) kubeconfig get $(LOCAL_TESTING_K3D_CLUSTER) > kubeconfig.yaml
 	@echo "Installing Traefik..."
 	@KUBECONFIG=kubeconfig.yaml $(HELM) repo add traefik https://traefik.github.io/charts --force-update
 	@KUBECONFIG=kubeconfig.yaml $(HELM) repo update
@@ -195,24 +195,24 @@ setup-kind: setup-hosts ## Set up a K3D cluster for LOCAL_TESTING if it does not
 		--set "tolerations[0].operator=Exists" \
 		--set "tolerations[0].effect=NoSchedule" \
 		--wait \
-		--kube-context $(LOCAL_TESTING_KIND_CONTEXT)
+		--kube-context $(LOCAL_TESTING_K3D_CONTEXT)
 	@echo "Creating local-testing namespace..."
-	@if ! KUBECONFIG=kubeconfig.yaml $(KUBECTL) get namespace local-testing --context $(LOCAL_TESTING_KIND_CONTEXT) >/dev/null 2>&1; then \
-		KUBECONFIG=kubeconfig.yaml $(KUBECTL) create namespace local-testing --context $(LOCAL_TESTING_KIND_CONTEXT); \
+	@if ! KUBECONFIG=kubeconfig.yaml $(KUBECTL) get namespace local-testing --context $(LOCAL_TESTING_K3D_CONTEXT) >/dev/null 2>&1; then \
+		KUBECONFIG=kubeconfig.yaml $(KUBECTL) create namespace local-testing --context $(LOCAL_TESTING_K3D_CONTEXT); \
 	fi
 	@echo "Building manager Docker image..."
 	$(CONTAINER_TOOL) build -t $(IMG) .
 	@echo "Loading image into K3D cluster..."
-	$(K3D) image import $(IMG) --cluster $(LOCAL_TESTING_KIND_CLUSTER)
+	$(K3D) image import $(IMG) --cluster $(LOCAL_TESTING_K3D_CLUSTER)
 	@echo "Generating webhook certificates..."
 	KUBECONFIG=$(PWD)/kubeconfig.yaml bash hack/generate-webhook-certs.sh local-testing webhook-service webhook-server-cert
 
 .PHONY: deploy-manager-local-testing
 deploy-manager-local-testing: ## Deploy manager to local-testing with webhooks enabled
 	@echo "Deploying manager with webhooks enabled..."
-	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) apply -k config/local-testing/ --context $(LOCAL_TESTING_KIND_CONTEXT)
-	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) set image deployment/controller-manager manager=$(IMG) -n local-testing --context $(LOCAL_TESTING_KIND_CONTEXT)
-	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) rollout restart deployment/controller-manager -n local-testing --context $(LOCAL_TESTING_KIND_CONTEXT)
+	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) apply -k config/local-testing/ --context $(LOCAL_TESTING_K3D_CONTEXT)
+	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) set image deployment/controller-manager manager=$(IMG) -n local-testing --context $(LOCAL_TESTING_K3D_CONTEXT)
+	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) rollout restart deployment/controller-manager -n local-testing --context $(LOCAL_TESTING_K3D_CONTEXT)
 	@echo "Installing Authentik..."
 	@KUBECONFIG=$(PWD)/kubeconfig.yaml $(HELM) repo add authentik https://charts.goauthentik.io --force-update
 	@KUBECONFIG=$(PWD)/kubeconfig.yaml $(HELM) repo update
@@ -223,11 +223,11 @@ deploy-manager-local-testing: ## Deploy manager to local-testing with webhooks e
 		--set postgresql.enabled=true \
 		--set postgresql.auth.password=authentik \
 		--wait \
-		--kube-context $(LOCAL_TESTING_KIND_CONTEXT)
-	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) apply -f config/local-testing/authentik_ingressroute.yaml --context $(LOCAL_TESTING_KIND_CONTEXT)
+		--kube-context $(LOCAL_TESTING_K3D_CONTEXT)
+	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) apply -f config/local-testing/authentik_ingressroute.yaml --context $(LOCAL_TESTING_K3D_CONTEXT)
 	KUBECONFIG=$(PWD)/kubeconfig.yaml bash hack/configure-authentik-local-testing.sh
 	@echo "Waiting for manager deployment to be ready (this may take a moment)..."
-	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) rollout status deployment/controller-manager -n local-testing --timeout=120s --context $(LOCAL_TESTING_KIND_CONTEXT)
+	KUBECONFIG=$(PWD)/kubeconfig.yaml $(KUBECTL) rollout status deployment/controller-manager -n local-testing --timeout=120s --context $(LOCAL_TESTING_K3D_CONTEXT)
 	@echo "Manager is ready!"
 
 .PHONY: web-build

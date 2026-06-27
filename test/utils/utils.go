@@ -170,9 +170,9 @@ func K3dBinary() string {
 	return "k3d"
 }
 
-// DefaultK3dClusterName returns the test cluster name, honouring KIND_CLUSTER env var.
+// DefaultK3dClusterName returns the test cluster name, honouring K3D_CLUSTER env var.
 func DefaultK3dClusterName() string {
-	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok && v != "" {
+	if v, ok := os.LookupEnv("K3D_CLUSTER"); ok && v != "" {
 		return v
 	}
 	return defaultK3dCluster
