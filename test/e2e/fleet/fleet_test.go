@@ -48,12 +48,10 @@ limitations under the License.
 //  2. Annotation gate         – Ingresses without the replicate annotation do NOT replicate
 //  3. Source tagging          – links carry "foreign:<endpoint>:ingress" source prefix
 //  4. Group placement         – replicated links land in the correct group
-//  5. Loop prevention         – a resource on alpha appears once (local) in alpha and
-//                               once (foreign) in each of beta/gamma/delta; never echoed
+//  5. Loop prevention         – a resource on alpha appears once (local) in alpha and once (foreign) in each of beta/gamma/delta; never echoed
 //  6. Isolation               – alpha's own resources are never shown as "foreign" in alpha
 //  7. Service replication     – annotated Services replicate the same way as Ingresses
-//  8. Graceful degradation    – a cluster's dashboard returns HTTP 200 when one peer is
-//                               unreachable; remaining peers' resources still appear
+//  8. Graceful degradation    – a cluster's dashboard returns HTTP 200 when one peer is unreachable; remaining peers' resources still appear
 package fleet_test
 
 import (
@@ -85,7 +83,6 @@ const (
 	dashboardServiceName = "cupboard-web-test"
 
 	// Cupboard annotations / labels used in test manifests.
-	annEnabled   = "cupboard.netztronaut.de/enabled"
 	annReplicate = "cupboard.netztronaut.de/replicate"
 	annGroup     = "cupboard.netztronaut.de/group"
 	annName      = "cupboard.netztronaut.de/name"
