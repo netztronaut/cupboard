@@ -22,6 +22,12 @@ import (
 
 // BookmarkGroupSpec defines the desired state of BookmarkGroup
 type BookmarkGroupSpec struct {
+	// Name is the display name shown on the dashboard for this group.
+	// Defaults to the resource's metadata.name when omitted.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name,omitempty"`
+
 	// Properties allows free-form metadata for this group, compatible with Forecastle.
 	// +optional
 	Properties map[string]string `json:"properties,omitempty"`

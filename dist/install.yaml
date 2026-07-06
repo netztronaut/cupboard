@@ -47,6 +47,12 @@ spec:
           spec:
             description: spec defines the desired state of BookmarkGroup
             properties:
+              name:
+                description: |-
+                  Name is the display name shown on the dashboard for this group.
+                  Defaults to the resource's metadata.name when omitted.
+                maxLength: 253
+                type: string
               properties:
                 additionalProperties:
                   type: string

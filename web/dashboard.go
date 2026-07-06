@@ -494,6 +494,9 @@ func collectBookmarkGroups(ctx context.Context, c client.Reader, groups map[stri
 		if len(item.Spec.Properties) > 0 {
 			existing.Properties = item.Spec.Properties
 		}
+		if displayName := strings.TrimSpace(item.Spec.Name); displayName != "" {
+			existing.DisplayName = displayName
+		}
 		groupDetails[groupName] = existing
 		groupReplicate[item.Name] = item.Spec.Replicate
 	}
