@@ -252,13 +252,20 @@ docker-push: ## Push docker image with the manager.
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
 PLATFORMS ?= linux/amd64,linux/arm64
+# Written by docker-buildx with the digest of the image it just built and pushed.
+# We read the digest back from this file (not from a registry lookup on IMG's tag)
+# because that tag is shared with the Helm chart OCI push (see helm-push-oci) and
+# whichever was pushed most recently wins the tag - inspecting the tag after the
+# fact can return the chart's manifest instead of the image's.
+DOCKER_METADATA_FILE ?= dist/docker-buildx-metadata.json
 .PHONY: docker-buildx
 docker-buildx: ## Build and push linux/amd64 and linux/arm64 docker images for the manager.
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+	mkdir -p "$(dir $(DOCKER_METADATA_FILE))"
 	- $(CONTAINER_TOOL) buildx create --name cupboard-builder
 	$(CONTAINER_TOOL) buildx use cupboard-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	$(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} --metadata-file "$(DOCKER_METADATA_FILE)" -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm cupboard-builder
 	rm Dockerfile.cross
 
@@ -458,7 +465,9 @@ release: ## Test, publish multi-arch image, build installer, package and push He
 .PHONY: upload
 upload: test test-e2e ## Build and push multi-arch image, then pin its digest in the Helm chart and push to OCI registry.
 	$(MAKE) docker-buildx IMG="$(IMG)"
-	$(eval _DIGEST := $(shell $(CONTAINER_TOOL) buildx imagetools inspect "$(IMG)" --format '{{.Manifest.Digest}}'))
-	$(eval _IMGREF := $(shell echo "$(IMG)" | sed 's|^docker\.io/||')@$(_DIGEST))
-	sed -i.bak -e "s|^\( *repository:\).*|\1 $(_IMGREF)|" "$(HELM_CHART_DIR)/values.yaml" && rm -f "$(HELM_CHART_DIR)/values.yaml.bak"
+	digest=$$(grep -o '"containerimage.digest" *: *"[^"]*"' "$(DOCKER_METADATA_FILE)" | grep -o 'sha256:[0-9a-f]*'); \
+	rm -f "$(DOCKER_METADATA_FILE)"; \
+	if [ -z "$$digest" ]; then echo "error: could not read image digest from build metadata" >&2; exit 1; fi; \
+	imgref="$$(echo "$(IMG)" | sed 's|^docker\.io/||')@$$digest"; \
+	sed -i.bak -e "s|^\( *repository:\).*|\1 $$imgref|" "$(HELM_CHART_DIR)/values.yaml" && rm -f "$(HELM_CHART_DIR)/values.yaml.bak"
 	$(MAKE) helm-push-oci HELM_CHART_VERSION="$(HELM_CHART_VERSION)" HELM_APP_VERSION="$(HELM_APP_VERSION)"
