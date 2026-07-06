@@ -16,7 +16,7 @@ manager:
   replicas: 1
 
   image:
-    repository: netztronaut/cupboard:0.1.0@sha256:5a375fa508e5b308f02be0e530a42e928863c2753beb55c6dbe8acf7e623d9c5
+    repository: netztronaut/cupboard:0.1.0@sha256:619f9ecade939d543ebbe810257060295259e365ec254dd179389afd386f9004
     ## Image tag (defaults to Chart.appVersion if not set)
     ##
     # tag: ""
