@@ -68,6 +68,19 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+// alwaysOnRunnable wraps a manager.RunnableFunc so it starts on every replica regardless
+// of leader election outcome. Serving the embedded web UI and the sync endpoint is
+// read-only observation of already-cached data, not a cluster write, so it must not wait
+// for (or be blocked by) an unacquired leader lock.
+type alwaysOnRunnable struct {
+	manager.RunnableFunc
+}
+
+// NeedLeaderElection implements manager.LeaderElectionRunnable.
+func (alwaysOnRunnable) NeedLeaderElection() bool {
+	return false
+}
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
@@ -592,7 +605,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+	if err := mgr.Add(alwaysOnRunnable{manager.RunnableFunc(func(ctx context.Context) error {
 		server := &http.Server{
 			Addr:              webAddr,
 			Handler:           webHandler,
@@ -613,7 +626,7 @@ func main() {
 			return serveErr
 		}
 		return nil
-	})); err != nil {
+	})}); err != nil {
 		setupLog.Error(err, "Failed to add embedded web interface runnable")
 		os.Exit(1)
 	}
@@ -625,7 +638,7 @@ func main() {
 			os.Exit(1)
 		}
 		syncServerHandler := webHandler.NewSyncHandler()
-		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		if err := mgr.Add(alwaysOnRunnable{manager.RunnableFunc(func(ctx context.Context) error {
 			server := &http.Server{
 				Addr:              syncAddr,
 				Handler:           syncServerHandler,
@@ -651,7 +664,7 @@ func main() {
 				}
 			}
 			return nil
-		})); err != nil {
+		})}); err != nil {
 			setupLog.Error(err, "Failed to add sync endpoint runnable")
 			os.Exit(1)
 		}

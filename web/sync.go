@@ -40,6 +40,13 @@ func NewSyncClient(options SyncOptions) (*SyncClient, error) {
 	}, nil
 }
 
+// NeedLeaderElection implements manager.LeaderElectionRunnable. Polling peer dashboards
+// is read-only observation, so every replica must keep doing it regardless of leader
+// election outcome.
+func (s *SyncClient) NeedLeaderElection() bool {
+	return false
+}
+
 // Start implements manager.Runnable. It polls peers every 30 seconds.
 func (s *SyncClient) Start(ctx context.Context) error {
 	ticker := time.NewTicker(30 * time.Second)

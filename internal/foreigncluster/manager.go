@@ -76,6 +76,13 @@ func (m *Manager) ActiveClusters() []ClusterInfo {
 	return out
 }
 
+// NeedLeaderElection implements manager.LeaderElectionRunnable. Connecting to foreign
+// clusters and listing their resources is read-only observation, so it must keep running
+// on every replica regardless of leader election outcome.
+func (m *Manager) NeedLeaderElection() bool {
+	return false
+}
+
 // Start implements manager.Runnable.
 func (m *Manager) Start(ctx context.Context) error {
 	m.connectAll()

@@ -53,6 +53,13 @@ func (n *DashboardNotifier) Notify() {
 	}
 }
 
+// NeedLeaderElection implements manager.LeaderElectionRunnable. Notifying connected
+// WebSocket clients is local observation, not a cluster write, so it must run on every
+// replica regardless of leader election outcome.
+func (n *DashboardNotifier) NeedLeaderElection() bool {
+	return false
+}
+
 // Start implements sigs.k8s.io/controller-runtime/pkg/manager.Runnable.
 // It rate-limits broadcasts to at most once per second and skips when no clients are connected.
 func (n *DashboardNotifier) Start(ctx context.Context) error {
