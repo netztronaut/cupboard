@@ -20,9 +20,13 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -233,6 +237,76 @@ func DefaultKubeconfig() string {
 		return ""
 	}
 	return home + "/.kube/config"
+}
+
+var forwardedPortPattern = regexp.MustCompile(`Forwarding from 127\.0\.0\.1:(\d+) ->`)
+
+// PortForwardGet starts a `kubectl port-forward` to podPort on the given pod, issues a
+// single HTTP GET to path, and returns the response body. The port-forward is torn down
+// before returning, whether or not the request succeeded.
+func PortForwardGet(namespace, pod string, podPort int, path string) (string, error) {
+	cmd := exec.Command("kubectl", "port-forward", "-n", namespace, "pod/"+pod, fmt.Sprintf(":%d", podPort))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to open port-forward stdout: %w", err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start port-forward: %w", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	localPort, err := readForwardedPort(stdout)
+	if err != nil {
+		return "", err
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d%s", localPort, path))
+	if err != nil {
+		return "", fmt.Errorf("failed to GET %s via port-forward: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return string(body), fmt.Errorf("unexpected status %d from %s", resp.StatusCode, path)
+	}
+	return string(body), nil
+}
+
+// readForwardedPort scans kubectl port-forward's stdout for the local port it bound to.
+func readForwardedPort(r io.Reader) (int, error) {
+	type result struct {
+		port int
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if m := forwardedPortPattern.FindStringSubmatch(line); m != nil {
+				port, err := strconv.Atoi(m[1])
+				ch <- result{port: port, err: err}
+				return
+			}
+		}
+		ch <- result{err: fmt.Errorf("port-forward exited before reporting a local port: %w", scanner.Err())}
+	}()
+
+	select {
+	case res := <-ch:
+		return res.port, res.err
+	case <-time.After(15 * time.Second):
+		return 0, fmt.Errorf("timed out waiting for port-forward to report a local port")
+	}
 }
 
 // GetNonEmptyLines converts given command output string into individual objects

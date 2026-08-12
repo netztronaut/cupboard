@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -355,6 +356,96 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
+
+		It("should keep observing and serving the dashboard on non-leader replicas", func() {
+			By("scaling the controller-manager to 2 replicas")
+			cmd := exec.Command("kubectl", "scale", "deployment", "cupboard-controller-manager",
+				"-n", namespace, "--replicas=2")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to scale controller-manager to 2 replicas")
+			DeferCleanup(func() {
+				cmd := exec.Command("kubectl", "scale", "deployment", "cupboard-controller-manager",
+					"-n", namespace, "--replicas=1")
+				_, _ = utils.Run(cmd)
+			})
+
+			var podNames []string
+			By("waiting for both replicas to become Ready")
+			verifyBothReplicasReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get",
+					"pods", "-l", "control-plane=controller-manager",
+					"-o", "go-template={{ range .items }}"+
+						"{{ if not .metadata.deletionTimestamp }}"+
+						"{{ .metadata.name }}{{ \" \" }}{{ .status.phase }}{{ \" \" }}"+
+						"{{ range .status.conditions }}{{ if eq .type \"Ready\" }}{{ .status }}{{ end }}{{ end }}"+
+						"{{ \"\\n\" }}{{ end }}{{ end }}",
+					"-n", namespace,
+				)
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				lines := utils.GetNonEmptyLines(output)
+				g.Expect(lines).To(HaveLen(2), "expected 2 controller-manager pods")
+				podNames = make([]string, 0, len(lines))
+				for _, line := range lines {
+					fields := strings.Fields(line)
+					g.Expect(fields).To(HaveLen(3), "unexpected pod status line: %q", line)
+					g.Expect(fields[1]).To(Equal("Running"))
+					g.Expect(fields[2]).To(Equal("True"), "pod %s not Ready", fields[0])
+					podNames = append(podNames, fields[0])
+				}
+			}
+			Eventually(verifyBothReplicasReady, 3*time.Minute, time.Second).Should(Succeed())
+
+			By("determining which replica holds the leader-election lease")
+			var leaderPod, followerPod string
+			verifyExactlyOneLeader := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "lease", "7cd7701f.netztronaut.de",
+					"-n", namespace, "-o", "jsonpath={.spec.holderIdentity}")
+				holder, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(holder).NotTo(BeEmpty(), "lease has no holder yet")
+
+				leaderPod = ""
+				followerPod = ""
+				for _, pod := range podNames {
+					if strings.HasPrefix(holder, pod+"_") {
+						leaderPod = pod
+					} else {
+						followerPod = pod
+					}
+				}
+				g.Expect(leaderPod).NotTo(BeEmpty(), "lease holder %q does not match either replica", holder)
+				g.Expect(followerPod).NotTo(BeEmpty())
+			}
+			Eventually(verifyExactlyOneLeader, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying only the leader replica runs the reconcilers")
+			leaderLogs, err := utils.Run(exec.Command("kubectl", "logs", leaderPod, "-n", namespace))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(leaderLogs).To(ContainSubstring("Starting Controller"),
+				"leader replica should start the CR reconcilers")
+
+			followerLogs, err := utils.Run(exec.Command("kubectl", "logs", followerPod, "-n", namespace))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(followerLogs).NotTo(ContainSubstring("Starting Controller"),
+				"non-leader replica must not run the CR reconcilers")
+			Expect(followerLogs).To(ContainSubstring("Starting embedded web interface"),
+				"non-leader replica must still serve the embedded web interface")
+
+			// /api/openapi.json is served unauthenticated (see web/handler.go), so it works
+			// regardless of the deployment's --enable-auth setting and proves the embedded
+			// web server itself is up and responding on every replica, not just the leader.
+			By("verifying the embedded web interface responds on both the leader and the non-leader replica")
+			for _, pod := range []string{leaderPod, followerPod} {
+				verifyWebInterfaceServed := func(g Gomega) {
+					body, err := utils.PortForwardGet(namespace, pod, 8082, "/api/openapi.json")
+					g.Expect(err).NotTo(HaveOccurred(), "Failed to reach /api/openapi.json on pod %s", pod)
+					g.Expect(body).To(ContainSubstring("\"openapi\""),
+						"unexpected /api/openapi.json response from pod %s: %s", pod, body)
+				}
+				Eventually(verifyWebInterfaceServed, time.Minute, time.Second).Should(Succeed())
+			}
+		})
 
 		// TODO: Customize the e2e test suite with scenarios specific to your project.
 		// Consider applying sample/CR(s) and check their status and/or verifying
