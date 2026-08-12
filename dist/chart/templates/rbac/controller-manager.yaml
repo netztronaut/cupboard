@@ -1,4 +1,4 @@
-{{- if ne .Values.serviceAccount.enable false }}
+{{- if and (eq (include ( printf "%s.%s" .Chart.Name "managerEnabled" ) .) "true") (ne .Values.serviceAccount.enable false) }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

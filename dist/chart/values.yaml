@@ -11,7 +11,7 @@
 manager:
   ## Set to false skips manager installation
   ##
-  enabled: true
+  enable: true
 
   replicas: 1
 
@@ -164,7 +164,7 @@ crd:
 ##
 forecastle:
   # Install the ForecastleApp compatibility CRD
-  enabled: false
+  enable: false
 
 ## Controller metrics endpoint.
 ## Enable to expose /metrics endpoint

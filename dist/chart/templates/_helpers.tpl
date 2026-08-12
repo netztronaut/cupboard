@@ -78,12 +78,26 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Whether the manager Deployment, and everything that exists only to support it
+(ServiceAccount, leader-election RBAC, its own ClusterRole/RoleBinding and viewer
+ClusterRole/ClusterRoleBinding), should render.
+Defaults to true when manager.enable is unset, for values files predating the flag.
+Renders the literal string "true" when enabled, empty string otherwise, so callers
+compare with: {{- if eq (include ( printf "%s.%s" .Chart.Name "managerEnabled" ) .) "true" }}
+*/}}
+{{- define "cupboard.managerEnabled" -}}
+{{- if or (not (hasKey .Values.manager "enable")) .Values.manager.enable -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
 ServiceAccount name to use.
 If serviceAccount.enable is false and serviceAccount.name is set, use that name.
 Otherwise, use the standard resourceName helper with "controller-manager" suffix.
 */}}
 {{- define "cupboard.serviceAccountName" -}}
-{{- if and (not (.Values.serviceAccount.enable | default true)) .Values.serviceAccount.name }}
+{{- if and (eq .Values.serviceAccount.enable false) .Values.serviceAccount.name }}
 {{- .Values.serviceAccount.name }}
 {{- else }}
 {{- include ( printf "%s.%s" .Chart.Name "resourceName" ) (dict "suffix" "controller-manager" "context" .) }}

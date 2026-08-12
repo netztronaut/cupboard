@@ -1,4 +1,4 @@
-{{- if or (not (hasKey .Values.manager "enabled")) (.Values.manager.enabled) }}
+{{- if eq (include ( printf "%s.%s" .Chart.Name "managerEnabled" ) .) "true" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

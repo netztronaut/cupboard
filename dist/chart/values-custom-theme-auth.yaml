@@ -62,7 +62,7 @@ manager:
         name: cupboard-custom-theme
 
 forecastle:
-  enabled: true
+  enable: true
 
 additionalResources:
   - |
