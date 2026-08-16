@@ -42,6 +42,16 @@ export function initial(value?: string): string {
 
 export type TemplateSet = 'default' | 'forecastle'
 
+// isCustomTemplateSet reports whether the configured template set is one the
+// SPA has no React port for — an operator-supplied, filesystem-loaded set
+// (see web/handler.go's readPageTemplateFile / README's template-set
+// resolution order). Arbitrary Go templates can't be introspected from the
+// browser, so those don't get a matching React view; see hasServerRenderedTheme
+// in App.tsx for how the caller should handle this.
+export function isCustomTemplateSet(set?: string): boolean {
+  return !!set && set !== 'default' && set !== 'forecastle'
+}
+
 function resolveTemplateSet(set?: string): TemplateSet {
   return set === 'forecastle' ? 'forecastle' : 'default'
 }

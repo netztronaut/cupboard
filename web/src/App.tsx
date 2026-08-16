@@ -3,7 +3,7 @@ import type { User } from 'oidc-client-ts'
 import './App.css'
 import { clearUserSession, currentUser, getAuthConfig, handleAuthCallback, loginWithPKCE, type PageConfig } from './auth'
 import { ThemedContent } from './ThemedContent'
-import { applyPageTheme, type TemplateSet } from './theme'
+import { applyPageTheme, isCustomTemplateSet, type TemplateSet } from './theme'
 import type { DashboardResponse, DashboardGroup } from './types'
 
 const SIGN_IN_BACKOFF_KEY = 'cupboard.auth.signInBackoff'
@@ -61,6 +61,18 @@ function App() {
     setThemeSet(applyPageTheme(page))
     setPageTitle(page?.title || 'cupboard')
     setContentLayout(page?.contentLayout || 'list')
+  }
+
+  // For a template set the SPA has no React port for (any operator-supplied,
+  // filesystem-loaded set — see isCustomTemplateSet), rendering an approximation
+  // here would drift from the real theme. Instead, once auth is resolved, hand
+  // off to the same auth-gated server route ("/") that already renders that
+  // exact template correctly with the session cookie that was just established.
+  // Never resolves: the splash stays up (nothing themed or unthemed is painted)
+  // until the browser actually navigates away.
+  const handOffToServerTemplate = async (): Promise<never> => {
+    window.location.replace('/')
+    return new Promise<never>(() => {})
   }
 
   const fetchDashboard = async (token?: string) => {
@@ -157,6 +169,9 @@ function App() {
         setAuthEnabled(authConfig.enabled)
         if (!authConfig.enabled) {
           setSubject('anonymous')
+          if (isCustomTemplateSet(authConfig.page?.templateSet)) {
+            await handOffToServerTemplate()
+          }
           await fetchDashboard()
           applyThemeForContent(authConfig.page)
           setWsEnabled(true)
@@ -191,6 +206,9 @@ function App() {
             return
           }
           resetSignInBackoff()
+          if (isCustomTemplateSet(authConfig.page?.templateSet)) {
+            await handOffToServerTemplate()
+          }
           await fetchDashboard()
           applyThemeForContent(authConfig.page)
           setWsEnabled(true)
@@ -199,6 +217,9 @@ function App() {
 
         if (await loadBackendSessionSubject()) {
           resetSignInBackoff()
+          if (isCustomTemplateSet(authConfig.page?.templateSet)) {
+            await handOffToServerTemplate()
+          }
           await fetchDashboard()
           applyThemeForContent(authConfig.page)
           setWsEnabled(true)
