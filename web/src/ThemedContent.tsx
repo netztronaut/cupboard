@@ -145,7 +145,7 @@ function sourceBadge(source?: string) {
       </span>
     )
   }
-  if (source === 'bookmarkgroup') {
+  if (source === 'bookmark') {
     return (
       <span className="fc-source">
         <i className="fa-solid fa-cube" aria-hidden="true" /> CRD

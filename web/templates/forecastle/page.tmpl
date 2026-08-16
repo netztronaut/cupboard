@@ -121,7 +121,7 @@
         const sourceBadgeHTML = (source) => {
           if (!source) return `<span class="fc-source"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Config</span>`;
           if (source === "forecastleapp") return `<span class="fc-source"><i class="fa-solid fa-cubes" aria-hidden="true"></i> Forecastle</span>`;
-          if (source === "bookmarkgroup") return `<span class="fc-source"><i class="fa-solid fa-cube" aria-hidden="true"></i> CRD</span>`;
+          if (source === "bookmark") return `<span class="fc-source"><i class="fa-solid fa-cube" aria-hidden="true"></i> CRD</span>`;
           // InfoTile source is raw HTML — render as-is
           return `<span class="fc-source">${source}</span>`;
         };
