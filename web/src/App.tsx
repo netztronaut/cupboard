@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { User } from 'oidc-client-ts'
 import './App.css'
-import { clearUserSession, currentUser, getAuthConfig, handleAuthCallback, loginWithPKCE } from './auth'
+import { clearUserSession, currentUser, getAuthConfig, handleAuthCallback, loginWithPKCE, type PageConfig } from './auth'
+import { ThemedContent } from './ThemedContent'
+import { applyPageTheme, type TemplateSet } from './theme'
+import type { DashboardResponse, DashboardGroup } from './types'
 
 const SIGN_IN_BACKOFF_KEY = 'cupboard.auth.signInBackoff'
 const SIGN_IN_ATTEMPT_KEY = 'cupboard.auth.signInAttempts'
@@ -36,33 +39,6 @@ function resetSignInBackoff() {
   window.sessionStorage.removeItem(SIGN_IN_ATTEMPT_KEY)
 }
 
-type DashboardLink = {
-  name: string
-  url: string
-  target?: string
-  icon?: string
-  source?: string
-}
-
-type DashboardInfoTile = {
-  name: string
-  icon?: string
-  url?: string
-  target?: string
-  source?: string
-  content?: string
-}
-
-type DashboardGroup = {
-  name: string
-  links: DashboardLink[]
-  tiles?: DashboardInfoTile[]
-}
-
-type DashboardResponse = {
-  groups: DashboardGroup[]
-}
-
 function App() {
   const [groups, setGroups] = useState<DashboardGroup[]>([])
   const [error, setError] = useState<string>()
@@ -72,6 +48,20 @@ function App() {
   const [wsEnabled, setWsEnabled] = useState(false)
   const [retryIn, setRetryIn] = useState<number>()
   const [signInAttempts, setSignInAttempts] = useState(() => getSignInAttempts())
+  const [themeSet, setThemeSet] = useState<TemplateSet>('default')
+  const [pageTitle, setPageTitle] = useState('cupboard')
+  const [contentLayout, setContentLayout] = useState('list')
+
+  // Links/applies the configured template set's CSS and title/favicon. Callers
+  // must only invoke this once dashboard content has actually loaded — never
+  // while auth is still being resolved — so the browser never shows a themed
+  // shell before it's clear whether the user is signed in, and never shows a
+  // themed-but-empty page ahead of real content.
+  const applyThemeForContent = (page?: PageConfig) => {
+    setThemeSet(applyPageTheme(page))
+    setPageTitle(page?.title || 'cupboard')
+    setContentLayout(page?.contentLayout || 'list')
+  }
 
   const fetchDashboard = async (token?: string) => {
     const response = await fetch('/api/dashboard', {
@@ -168,6 +158,7 @@ function App() {
         if (!authConfig.enabled) {
           setSubject('anonymous')
           await fetchDashboard()
+          applyThemeForContent(authConfig.page)
           setWsEnabled(true)
           return
         }
@@ -201,6 +192,7 @@ function App() {
           }
           resetSignInBackoff()
           await fetchDashboard()
+          applyThemeForContent(authConfig.page)
           setWsEnabled(true)
           return
         }
@@ -208,6 +200,7 @@ function App() {
         if (await loadBackendSessionSubject()) {
           resetSignInBackoff()
           await fetchDashboard()
+          applyThemeForContent(authConfig.page)
           setWsEnabled(true)
           return
         }
@@ -274,15 +267,10 @@ function App() {
     }
   }, [wsEnabled])
 
-  const isImageIcon = (icon?: string) =>
-    !!icon &&
-    (icon.startsWith('http://') ||
-      icon.startsWith('https://') ||
-      icon.startsWith('data:') ||
-      icon.startsWith('/') ||
-      icon.startsWith('./') ||
-      icon.startsWith('../'))
-
+  // While loading (auth still being resolved, or the first dashboard fetch
+  // still in flight) show only this neutral, theme-independent splash — no
+  // stylesheet for any template set is linked yet, so there is nothing here
+  // for a previously-applied theme to clash with.
   if (loading) {
     return (
       <div className="splash">
@@ -299,59 +287,15 @@ function App() {
   }
 
   return (
-    <main className="app">
-      <header>
-        <h1>cupboard</h1>
-        <p className="subtitle">Kubernetes operator control surface</p>
-        <div className="actions">
-          {!authEnabled ? (
-            <small>authentication disabled</small>
-          ) : subject ? (
-            <small>signed in as {subject}</small>
-          ) : error ? (
-            <small>sign-in unavailable</small>
-          ) : (
-            <small>sign-in required</small>
-          )}
-        </div>
-      </header>
-
-      <section className="panel">
-        <h2>Bookmarks</h2>
-        {error && <p className="error">{error}</p>}
-        {!error && groups.length === 0 && <p>No bookmark data found yet.</p>}
-        {groups.map((group) => (
-          <article key={group.name} className="group">
-            <h3>{group.name}</h3>
-            <ul>
-              {group.links.map((link) => (
-                <li key={`${group.name}-${link.name}-${link.url}`}>
-                  <a href={link.url} target={link.target || '_self'} rel="noreferrer">
-                    {isImageIcon(link.icon) ? <img src={link.icon} alt="" /> : link.icon ? <small>{link.icon}</small> : null}
-                    <span>{link.name}</span>
-                  </a>
-                  {link.source && <small>{link.source}</small>}
-                </li>
-              ))}
-              {(group.tiles ?? []).map((tile) => (
-                <li key={`${group.name}-tile-${tile.name}`} className="info-tile">
-                  {tile.url
-                    ? <a href={tile.url} target={tile.target || '_self'} rel="noreferrer"><span>{tile.name}</span></a>
-                    : <span>{tile.name}</span>
-                  }
-                  {tile.content && (
-                    // content is trusted HTML rendered by the operator's Processor template
-                    // eslint-disable-next-line react/no-danger
-                    <div dangerouslySetInnerHTML={{ __html: tile.content }} />
-                  )}
-                  {tile.source && <small dangerouslySetInnerHTML={{ __html: tile.source }} />}
-                </li>
-              ))}
-            </ul>
-          </article>
-        ))}
-      </section>
-    </main>
+    <ThemedContent
+      templateSet={themeSet}
+      title={pageTitle}
+      contentLayout={contentLayout}
+      groups={groups}
+      authEnabled={authEnabled}
+      subject={subject}
+      error={error}
+    />
   )
 }
 

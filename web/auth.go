@@ -60,12 +60,24 @@ type authService struct {
 }
 
 type authConfigResponse struct {
-	Enabled                bool   `json:"enabled"`
-	IssuerURL              string `json:"issuerUrl,omitempty"`
-	OpenIDConfigurationURL string `json:"openidConfigurationUrl,omitempty"`
-	ClientID               string `json:"clientId,omitempty"`
-	RedirectPath           string `json:"redirectPath,omitempty"`
-	Scopes                 string `json:"scopes,omitempty"`
+	Enabled                bool               `json:"enabled"`
+	IssuerURL              string             `json:"issuerUrl,omitempty"`
+	OpenIDConfigurationURL string             `json:"openidConfigurationUrl,omitempty"`
+	ClientID               string             `json:"clientId,omitempty"`
+	RedirectPath           string             `json:"redirectPath,omitempty"`
+	Scopes                 string             `json:"scopes,omitempty"`
+	Page                   pageConfigResponse `json:"page"`
+}
+
+// pageConfigResponse tells the SPA which server-side template set (theme) is
+// configured, so it can match that look once it has something to render.
+// It must never influence what the SPA shows before auth is resolved and
+// dashboard content has loaded — see App.tsx.
+type pageConfigResponse struct {
+	TemplateSet   string `json:"templateSet,omitempty"`
+	Title         string `json:"title,omitempty"`
+	FaviconURL    string `json:"faviconUrl,omitempty"`
+	ContentLayout string `json:"contentLayout,omitempty"`
 }
 
 func newAuthService(options AuthOptions) *authService {
