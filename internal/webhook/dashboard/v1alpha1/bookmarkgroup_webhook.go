@@ -21,9 +21,6 @@ import (
 	"fmt"
 	"net/url"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -100,15 +97,4 @@ func validateTarget(target dashboardv1alpha1.BookmarkLinkTarget) error {
 		return nil
 	}
 	return fmt.Errorf("unsupported target %q", target)
-}
-
-func fieldValidationError(obj *dashboardv1alpha1.BookmarkGroup, msg string) error {
-	validationErrs := field.ErrorList{
-		field.Invalid(field.NewPath("spec"), obj.Spec, msg),
-	}
-	return apierrors.NewInvalid(
-		schema.GroupKind{Group: dashboardv1alpha1.GroupVersion.Group, Kind: "BookmarkGroup"},
-		obj.Name,
-		validationErrs,
-	)
 }

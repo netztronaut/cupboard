@@ -204,12 +204,6 @@ func NewHandler(k8sClient client.Client, discovery dashboardDiscovery, options O
 			return
 		}
 		config := auth.authConfig(r.Context(), requestBaseURL(r))
-		config.Page = pageConfigResponse{
-			TemplateSet:   firstNonEmptyString(options.Page.TemplateSet, "default"),
-			Title:         firstNonEmptyString(options.Page.Title, "cupboard"),
-			FaviconURL:    options.Page.FaviconURL,
-			ContentLayout: firstNonEmptyString(options.Page.ContentLayout, "list"),
-		}
 		index, injectErr := injectAuthConfig(index, config)
 		if injectErr != nil {
 			http.Error(w, injectErr.Error(), http.StatusInternalServerError)

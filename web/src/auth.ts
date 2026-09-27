@@ -1,16 +1,5 @@
 import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts'
 
-// PageConfig mirrors web/auth.go's pageConfigResponse: which server-side
-// template set (theme) is configured, so the SPA can match that look once
-// it has real content to show. It must never be used to decide what to
-// render before auth is resolved — see applyPageTheme in theme.ts.
-export type PageConfig = {
-  templateSet?: string
-  title?: string
-  faviconUrl?: string
-  contentLayout?: string
-}
-
 export type AuthConfig = {
   enabled: boolean
   issuerUrl?: string
@@ -18,7 +7,6 @@ export type AuthConfig = {
   clientId?: string
   redirectPath?: string
   scopes?: string
-  page?: PageConfig
 }
 
 declare global {
