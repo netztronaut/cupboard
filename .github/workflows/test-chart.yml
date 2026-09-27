@@ -2,7 +2,10 @@ name: Test Chart
 
 on:
   push:
+  # Later pushes to a PR branch are already covered by the push trigger, so
+  # only run for the PR when it is opened or reopened, not on every push.
   pull_request:
+    types: [opened, reopened]
 
 permissions: {}
 
