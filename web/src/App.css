@@ -1,9 +1,6 @@
 /*
- * This file only styles the pre-auth/pre-content splash screen and generic
- * error text — deliberately theme-independent. Once auth is resolved and
- * dashboard content has loaded, App.tsx links the configured template set's
- * own stylesheet (see ThemedContent.tsx / theme.ts / web/static/themes/) and
- * everything below stops applying.
+ * Styles for the sign-in splash, the only thing the SPA renders. Dashboard
+ * pages are server-rendered from web/templates/<set>/ with their own CSS.
  */
 
 .splash {
