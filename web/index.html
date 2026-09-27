@@ -4,10 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>web</title>
+    <title>cupboard</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Same markup as the Splash component in src/App.tsx: shown from the
+         first paint, before the bundle runs, and replaced once React renders. -->
+    <div id="root">
+      <div class="splash" role="status" aria-live="polite">
+        <div class="spinner" aria-hidden="true"></div>
+        <p class="visually-hidden">Loading…</p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

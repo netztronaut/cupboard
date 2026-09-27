@@ -10,6 +10,8 @@ const SIGN_IN_BACKOFF_KEY = 'cupboard.auth.signInBackoff'
 const SIGN_IN_ATTEMPT_KEY = 'cupboard.auth.signInAttempts'
 const SIGN_IN_BACKOFF_INITIAL_MS = 5_000
 const SIGN_IN_BACKOFF_MAX_MS = 60_000
+const HANDOFF_KEY = 'cupboard.auth.handoffAt'
+const HANDOFF_LOOP_WINDOW_MS = 15_000
 
 let autoSignInPromise: Promise<void> | undefined
 
@@ -39,6 +41,59 @@ function resetSignInBackoff() {
   window.sessionStorage.removeItem(SIGN_IN_ATTEMPT_KEY)
 }
 
+// handOffToServerPage navigates to "/", which the server renders from the
+// configured template set for the current session — the exact view a manual
+// reload would show, filtered by the signed-in user's groups. Never resolves:
+// the splash stays up until the browser has navigated away.
+//
+// If the SPA is served for "/" again right after a hand-off, the server did
+// not accept the session cookie (e.g. the browser dropped it). Redirecting
+// again would loop forever, so report that instead.
+function handOffToServerPage(): Promise<never> {
+  const last = Number.parseInt(window.sessionStorage.getItem(HANDOFF_KEY) ?? '', 10)
+  window.sessionStorage.removeItem(HANDOFF_KEY)
+  if (Number.isFinite(last) && Date.now() - last < HANDOFF_LOOP_WINDOW_MS) {
+    throw new Error('signed in, but the server did not accept the session cookie')
+  }
+  window.sessionStorage.setItem(HANDOFF_KEY, String(Date.now()))
+  window.location.replace('/')
+  return new Promise<never>(() => {})
+}
+
+type SplashProps = {
+  retryIn?: number
+  signInAttempts: number
+  error?: string
+}
+
+// Splash is the neutral, theme-independent loading screen shown while auth is
+// being resolved. web/index.html carries the same markup so it is visible
+// before this bundle has even executed.
+function Splash({ retryIn, signInAttempts, error }: SplashProps) {
+  if (error) {
+    return (
+      <div className="splash" role="alert">
+        <p className="error">Sign-in failed: {error}</p>
+        <button type="button" className="splash-retry" onClick={() => window.location.replace('/')}>
+          Try again
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="splash" role="status" aria-live="polite">
+      <div className="spinner" aria-hidden="true" />
+      {retryIn !== undefined ? <p>Retrying sign-in in {retryIn}s…</p> : <p className="visually-hidden">Loading…</p>}
+      {signInAttempts >= 3 && (
+        <p className="splash-warning">
+          Sign-in is taking longer than expected. Please check that the identity provider is reachable and your
+          network connection is stable. Retrying automatically…
+        </p>
+      )}
+    </div>
+  )
+}
+
 function App() {
   const [groups, setGroups] = useState<DashboardGroup[]>([])
   const [error, setError] = useState<string>()
@@ -61,18 +116,6 @@ function App() {
     setThemeSet(applyPageTheme(page))
     setPageTitle(page?.title || 'cupboard')
     setContentLayout(page?.contentLayout || 'list')
-  }
-
-  // For a template set the SPA has no React port for (any operator-supplied,
-  // filesystem-loaded set — see isCustomTemplateSet), rendering an approximation
-  // here would drift from the real theme. Instead, once auth is resolved, hand
-  // off to the same auth-gated server route ("/") that already renders that
-  // exact template correctly with the session cookie that was just established.
-  // Never resolves: the splash stays up (nothing themed or unthemed is painted)
-  // until the browser actually navigates away.
-  const handOffToServerTemplate = async (): Promise<never> => {
-    window.location.replace('/')
-    return new Promise<never>(() => {})
   }
 
   const fetchDashboard = async (token?: string) => {
@@ -101,26 +144,13 @@ function App() {
     if (!response.ok) {
       throw new Error(`backend auth failed (${response.status})`)
     }
-    const session = (await response.json()) as { userInfo?: Record<string, unknown> }
-    const sub = session.userInfo?.sub
-    if (typeof sub === 'string') {
-      setSubject(sub)
-    }
   }
 
-  const loadBackendSessionSubject = async (): Promise<boolean> => {
+  const hasBackendSession = async (): Promise<boolean> => {
     const response = await fetch('/api/session', {
       credentials: 'include',
     })
-    if (!response.ok) {
-      return false
-    }
-    const session = (await response.json()) as { userInfo?: Record<string, unknown> }
-    const sub = session.userInfo?.sub
-    if (typeof sub === 'string') {
-      setSubject(sub)
-    }
-    return true
+    return response.ok
   }
 
   const validCurrentUser = async (): Promise<User | null> => {
@@ -169,8 +199,12 @@ function App() {
         setAuthEnabled(authConfig.enabled)
         if (!authConfig.enabled) {
           setSubject('anonymous')
+          // For a template set the SPA has no React port for (any
+          // operator-supplied, filesystem-loaded set — see isCustomTemplateSet),
+          // an approximation here would drift from the real theme; the server
+          // renders it exactly.
           if (isCustomTemplateSet(authConfig.page?.templateSet)) {
-            await handOffToServerTemplate()
+            await handOffToServerPage()
           }
           await fetchDashboard()
           applyThemeForContent(authConfig.page)
@@ -178,6 +212,10 @@ function App() {
           return
         }
 
+        // With auth enabled the SPA is only an authentication shell: it never
+        // renders dashboard content itself. Once the backend session cookie is
+        // established it hands off to the server-rendered page, so the user
+        // lands directly on the view that matches their identity and groups.
         const redirectPath = authConfig.redirectPath || '/auth/callback'
         const isCallback = window.location.pathname === redirectPath
         let user: User | null = null
@@ -206,27 +244,14 @@ function App() {
             return
           }
           resetSignInBackoff()
-          if (isCustomTemplateSet(authConfig.page?.templateSet)) {
-            await handOffToServerTemplate()
-          }
-          await fetchDashboard()
-          applyThemeForContent(authConfig.page)
-          setWsEnabled(true)
-          return
+          await handOffToServerPage()
         }
 
-        if (await loadBackendSessionSubject()) {
+        if (await hasBackendSession()) {
           resetSignInBackoff()
-          if (isCustomTemplateSet(authConfig.page?.templateSet)) {
-            await handOffToServerTemplate()
-          }
-          await fetchDashboard()
-          applyThemeForContent(authConfig.page)
-          setWsEnabled(true)
-          return
+          await handOffToServerPage()
         }
         await startAutomaticSignIn()
-
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
@@ -288,23 +313,12 @@ function App() {
     }
   }, [wsEnabled])
 
-  // While loading (auth still being resolved, or the first dashboard fetch
-  // still in flight) show only this neutral, theme-independent splash — no
-  // stylesheet for any template set is linked yet, so there is nothing here
-  // for a previously-applied theme to clash with.
-  if (loading) {
-    return (
-      <div className="splash">
-        <h1>cupboard</h1>
-        {retryIn !== undefined ? <p>Retrying sign-in in {retryIn}s…</p> : <p>Loading…</p>}
-        {signInAttempts >= 3 && (
-          <p className="splash-warning">
-            Sign-in is taking longer than expected. Please check that the identity provider is reachable and your
-            network connection is stable. Retrying automatically…
-          </p>
-        )}
-      </div>
-    )
+  // Until content is ready — and, with auth enabled, always, since that flow
+  // ends by handing off to the server-rendered page — show only the neutral,
+  // theme-independent splash. No template set's stylesheet is linked yet, so
+  // nothing half-rendered or wrongly themed is ever painted.
+  if (loading || authEnabled) {
+    return <Splash retryIn={retryIn} signInAttempts={signInAttempts} error={error} />
   }
 
   return (
