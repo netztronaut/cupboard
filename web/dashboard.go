@@ -147,7 +147,7 @@ type DashboardLink struct {
 // collectDashboard gathers all dashboard data and returns a filtered response.
 // When localOnly is true, remote data from sync peers is excluded (used by the sync server
 // itself to prevent re-exporting peer data and avoid sync cycles).
-func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []string, localOnly bool) (DashboardResponse, error) {
+func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []string, localOnly bool) (DashboardResponse, error) { //nolint:gocyclo
 	groups := map[string][]DashboardLink{}
 	tiles := map[string][]DashboardInfoTile{}
 	groupDetails := c.initLinkGroups()
@@ -240,7 +240,7 @@ func (c *dashboardCollector) collectDashboard(ctx context.Context, userGroups []
 		// In the sync path, always include groups marked for replication so that
 		// peer instances receive the group metadata (display name, properties)
 		// even when no bookmarks are reachable yet.
-		if len(links) == 0 && len(groupTiles) == 0 && !(localOnly && group.Replicate) {
+		if len(links) == 0 && len(groupTiles) == 0 && (!localOnly || !group.Replicate) {
 			continue
 		}
 		sort.SliceStable(links, func(i, j int) bool {
